@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>macOS Advanced IP Scanner | Hızlı Ağ & Port Tarayıcı</title>
+  <meta name="description" content="macOS için yüksek performanslı, modern arayüzlü yerel ağ (LAN) ve port tarama aracı. IP, MAC, OUI üretici tespiti ve mDNS/NetBIOS çözümleme.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- macOS Window Header Bar -->
+    <header class="app-header glass-card">
+      <div class="window-controls">
+        <span class="control-dot close" title="Kapat"></span>
+        <span class="control-dot minimize" title="Simge Durumuna Küçült"></span>
+        <span class="control-dot maximize" title="Büyüt"></span>
+      </div>
+
+      <div class="brand">
+        <div class="radar-icon-wrap" id="radarIcon">
+          <svg class="radar-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" stroke-opacity="0.3"></circle>
+            <circle cx="12" cy="12" r="6" stroke-opacity="0.5"></circle>
+            <circle cx="12" cy="12" r="2" fill="currentColor"></circle>
+            <path d="M12 2a10 10 0 0 1 10 10" class="radar-sweep"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Advanced IP Scanner</h1>
+          <span class="badge-os">macOS Edition</span>
+        </div>
+      </div>
+
+      <div class="header-status">
+        <span class="status-indicator" id="scannerStatusBadge">
+          <span class="pulse-dot idle" id="statusPulse"></span>
+          <span id="scannerStatusText">Hazır</span>
+        </span>
+      </div>
+
+      <div class="header-actions">
+        <button id="themeToggleBtn" class="btn-icon" title="Karanlık/Aydınlık Tema Değiştir" aria-label="Tema">
+          <svg class="sun-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+        </button>
+
+        <button id="settingsModalBtn" class="btn-icon" title="Tarama Ayarları" aria-label="Ayarlar">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Scanner Control Toolbar -->
+    <section class="toolbar-section glass-card">
+      <div class="toolbar-row">
+        <!-- Interface Selector -->
+        <div class="control-group iface-group">
+          <label for="ifaceSelect" class="control-label">Ağ Arayüzü</label>
+          <div class="select-wrapper">
+            <select id="ifaceSelect" class="custom-select">
+              <option value="">Arayüzler yükleniyor...</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- IP Range Input -->
+        <div class="control-group range-group">
+          <label for="ipRangeInput" class="control-label">IP Aralığı veya CIDR</label>
+          <div class="range-input-container">
+            <input type="text" id="ipRangeInput" class="text-input" placeholder="192.168.1.1-192.168.1.254" value="192.168.1.1-254" autocomplete="off" spellcheck="false">
+            <button id="detectSubnetBtn" class="btn-subtle" title="Mevcut Alt Ağı Otomatik Algıla">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+              </svg>
+              <span>Otomatik</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Scan & Stop Action Buttons -->
+        <div class="control-group action-buttons">
+          <button id="startScanBtn" class="btn btn-primary" title="Taramayı Başlat">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            <span>Tara</span>
+          </button>
+
+          <button id="stopScanBtn" class="btn btn-danger" disabled title="Taramayı Durdur">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12"></rect>
+            </svg>
+            <span>Durdur</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Secondary Scan Options Drawer -->
+      <div class="toolbar-subrow">
+        <div class="options-pills">
+          <label class="pill-checkbox">
+            <input type="checkbox" id="optScanPorts" checked>
+            <span class="pill-slider"></span>
+            <span class="pill-text">Port Taraması</span>
+          </label>
+
+          <label class="pill-checkbox">
+            <input type="checkbox" id="optDeepScan">
+            <span class="pill-slider"></span>
+            <span class="pill-text">Derin Tarama (32+ Port)</span>
+          </label>
+
+          <label class="pill-checkbox">
+            <input type="checkbox" id="optResolveNames" checked>
+            <span class="pill-slider"></span>
+            <span class="pill-text">mDNS & NetBIOS Çözümleme</span>
+          </label>
+        </div>
+
+        <div class="extra-ports-wrap">
+          <label for="extraPortsInput" class="mini-label">Ekstra Portlar:</label>
+          <input type="text" id="extraPortsInput" class="text-input-mini" placeholder="Örn: 8080, 3000, 8000-8020">
+        </div>
+
+        <div class="export-dropdown-wrap">
+          <button id="exportDropdownBtn" class="btn-subtle">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>Dışa Aktar</span>
+            <span class="arrow-down">▼</span>
+          </button>
+          <div class="export-menu hidden" id="exportMenu">
+            <button class="menu-item" data-format="csv">CSV İndir (.csv)</button>
+            <button class="menu-item" data-format="json">JSON İndir (.json)</button>
+            <button class="menu-item" data-format="txt">Metin Raporu (.txt)</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scan Progress Bar & Live Stats -->
+    <section class="progress-section glass-card">
+      <div class="stats-row">
+        <div class="stat-card">
+          <span class="stat-label">Toplam Taranan</span>
+          <span class="stat-value" id="statScanned">0 / 0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Aktif Cihaz</span>
+          <span class="stat-value text-emerald" id="statAlive">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Geçen Süre</span>
+          <span class="stat-value font-mono" id="statTime">0.0s</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Ağ Ağ Geçidi (Gateway)</span>
+          <span class="stat-value font-mono" id="statGateway">-</span>
+        </div>
+      </div>
+
+      <div class="progress-track" id="progressTrack">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+    </section>
+
+    <!-- Search & Quick Filter Bar -->
+    <section class="filter-section">
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="searchInput" class="search-input" placeholder="IP, MAC, İsim, Üretici veya Port ara... (Örn: 192.168, Apple, SSH)">
+        <button id="clearSearchBtn" class="clear-search-btn hidden" title="Aramayı Temizle">✕</button>
+      </div>
+
+      <div class="filter-chips" id="filterChips">
+        <button class="chip active" data-filter="all">Tümü (<span id="countAll">0</span>)</button>
+        <button class="chip" data-filter="router">Ağ Geçidi & Router</button>
+        <button class="chip" data-filter="computer">Bilgisayarlar</button>
+        <button class="chip" data-filter="mobile">Mobil Cihazlar</button>
+        <button class="chip" data-filter="apple">Apple</button>
+        <button class="chip" data-filter="iot">Akıllı / IoT</button>
+        <button class="chip" data-filter="hasPorts">Açık Portu Olanlar</button>
+      </div>
+    </section>
+
+    <!-- Main Results Table -->
+    <main class="table-container glass-card">
+      <table class="hosts-table" id="hostsTable">
+        <thead>
+          <tr>
+            <th class="col-status" data-sort="status">Durum</th>
+            <th class="col-type" data-sort="deviceType">Cihaz Türü</th>
+            <th class="col-ip" data-sort="ip">IP Adresi</th>
+            <th class="col-hostname" data-sort="hostname">Cihaz Adı / DNS</th>
+            <th class="col-mac" data-sort="mac">MAC Adresi</th>
+            <th class="col-vendor" data-sort="vendor">Üretici Firma (OUI)</th>
+            <th class="col-ping" data-sort="ping">Gecikme</th>
+            <th class="col-ports">Açık Portlar / Servisler</th>
+            <th class="col-actions">Hızlı Eylemler</th>
+          </tr>
+        </thead>
+        <tbody id="hostsTableBody">
+          <!-- Populated dynamically via JS -->
+          <tr class="empty-state-row" id="emptyStateRow">
+            <td colspan="9">
+              <div class="empty-state-content">
+                <div class="empty-state-illustration">
+                  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    <path d="M2 12h20"></path>
+                  </svg>
+                </div>
+                <h3>Taramaya Hazır</h3>
+                <p>Yerel ağınızdaki cihazları keşfetmek için yukarıdaki "Tara" butonuna tıklayın.</p>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+  </div>
+
+  <!-- Device Details Modal (<dialog>) -->
+  <dialog class="custom-dialog" id="deviceModal">
+    <div class="dialog-content glass-card">
+      <header class="dialog-header">
+        <div class="dialog-title-wrap">
+          <span class="dialog-device-icon" id="modalDeviceIcon">💻</span>
+          <div>
+            <h2 id="modalDeviceTitle">Cihaz Detayları</h2>
+            <span class="font-mono text-muted" id="modalDeviceIP">192.168.1.1</span>
+          </div>
+        </div>
+        <button class="dialog-close-btn" id="closeDeviceModalBtn">✕</button>
+      </header>
+
+      <div class="dialog-body">
+        <div class="details-grid">
+          <div class="detail-item">
+            <span class="detail-label">IP Adresi</span>
+            <span class="detail-value font-mono copyable" id="modalIP">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">MAC Adresi</span>
+            <span class="detail-value font-mono copyable" id="modalMAC">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Üretici Firma</span>
+            <span class="detail-value" id="modalVendor">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Cihaz Türü</span>
+            <span class="detail-value" id="modalType">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Cihaz Adı (mDNS / rDNS)</span>
+            <span class="detail-value font-mono" id="modalHostname">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">NetBIOS Bilgisayar Adı</span>
+            <span class="detail-value font-mono" id="modalNetBIOS">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Ping Gecikmesi</span>
+            <span class="detail-value font-mono" id="modalLatency">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Ağ Rolü</span>
+            <span class="detail-value" id="modalRole">-</span>
+          </div>
+        </div>
+
+        <div class="modal-section-ports">
+          <div class="section-title-row">
+            <h3>Açık Portlar</h3>
+            <button class="btn-subtle-sm" id="modalRescanPortsBtn">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+              </svg>
+              <span>Tüm Portları Tara</span>
+            </button>
+          </div>
+          <div class="modal-ports-list" id="modalPortsList">
+            <span class="text-muted">Açık port bulunamadı.</span>
+          </div>
+        </div>
+
+        <div class="modal-quick-actions">
+          <h3>Eylemler</h3>
+          <div class="actions-row">
+            <button class="btn btn-outline" id="modalActionHttp" title="Web Arayüzünü Aç">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+              <span>Web Arayüzü (HTTP)</span>
+            </button>
+
+            <button class="btn btn-outline" id="modalActionSSH" title="SSH Terminal Bağlantısı">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+              <span>SSH Aç</span>
+            </button>
+
+            <button class="btn btn-outline" id="modalActionPing" title="Ping Testi Başlat">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+              <span>Ping Testi</span>
+            </button>
+
+            <button class="btn btn-outline text-amber" id="modalActionWOL" title="Wake-on-LAN Paketi Gönder">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                <line x1="12" y1="2" x2="12" y2="12"></line>
+              </svg>
+              <span>Wake-on-LAN (WOL)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Live Ping Test Modal (<dialog>) -->
+  <dialog class="custom-dialog" id="pingModal">
+    <div class="dialog-content glass-card ping-dialog-size">
+      <header class="dialog-header">
+        <div class="dialog-title-wrap">
+          <span class="dialog-device-icon">⚡</span>
+          <div>
+            <h2>Canlı Ping Testi</h2>
+            <span class="font-mono text-muted" id="pingTargetIP">192.168.1.1</span>
+          </div>
+        </div>
+        <button class="dialog-close-btn" id="closePingModalBtn">✕</button>
+      </header>
+      <div class="dialog-body">
+        <div class="ping-stats-box">
+          <div>Gönderilen: <strong id="pingSentCount">0</strong></div>
+          <div>Başarılı: <strong class="text-emerald" id="pingSuccessCount">0</strong></div>
+          <div>Ortalama: <strong class="font-mono" id="pingAvgLatency">0 ms</strong></div>
+        </div>
+        <div class="ping-log-terminal" id="pingLogTerminal">
+          <div class="terminal-line text-muted">Ping testi başlatılıyor...</div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn btn-primary" id="togglePingTestBtn">Durdur</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Settings Modal (<dialog>) -->
+  <dialog class="custom-dialog" id="settingsModal">
+    <div class="dialog-content glass-card settings-dialog-size">
+      <header class="dialog-header">
+        <h2>Tarayıcı Tercihleri</h2>
+        <button class="dialog-close-btn" id="closeSettingsModalBtn">✕</button>
+      </header>
+      <div class="dialog-body">
+        <div class="form-group">
+          <label for="cfgTimeout" class="form-label">Zaman Aşımı (Timeout - ms)</label>
+          <input type="number" id="cfgTimeout" class="text-input" value="350" min="50" max="3000" step="50">
+          <small class="form-help">Düşük değer taramayı hızlandırır, yüksek değer yavaş cihazları daha iyi yakalar.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="cfgConcurrency" class="form-label">Eşzamanlı İş Parçacığı (Worker Goroutines)</label>
+          <input type="number" id="cfgConcurrency" class="text-input" value="50" min="10" max="150" step="5">
+          <small class="form-help">Aynı anda taranacak IP sayısı (Önerilen: 40 - 80).</small>
+        </div>
+
+        <div class="dialog-footer">
+          <button class="btn btn-primary" id="saveSettingsBtn">Kaydet ve Kapat</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

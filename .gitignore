@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Binaries
+macos-advance-ip-scanner
+dist/
+*.app
+
+# Scan Exports
+scan-results.csv
+scan-results.json
+scan-results.txt
+scan-*.csv
+scan-*.json
+scan-*.txt
+
+# Go temporary files
+*.exe
+*.test
+*.out
