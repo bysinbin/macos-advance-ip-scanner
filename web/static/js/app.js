@@ -51,6 +51,7 @@ const elements = {
   statAlive: document.getElementById('statAlive'),
   statTime: document.getElementById('statTime'),
   statGateway: document.getElementById('statGateway'),
+  progressTrack: document.getElementById('progressTrack'),
   progressFill: document.getElementById('progressFill'),
   scannerStatusText: document.getElementById('scannerStatusText'),
   statusPulse: document.getElementById('statusPulse'),
@@ -571,30 +572,30 @@ async function stopScan() {
 
 function setScanningUIState(isScanning) {
   state.isScanning = isScanning;
-  elements.startScanBtn.disabled = isScanning;
-  elements.stopScanBtn.disabled = !isScanning;
-  elements.ifaceSelect.disabled = isScanning;
-  elements.ipRangeInput.disabled = isScanning;
+  if (elements.startScanBtn) elements.startScanBtn.disabled = isScanning;
+  if (elements.stopScanBtn) elements.stopScanBtn.disabled = !isScanning;
+  if (elements.ifaceSelect) elements.ifaceSelect.disabled = isScanning;
+  if (elements.ipRangeInput) elements.ipRangeInput.disabled = isScanning;
 
   if (isScanning) {
-    elements.radarIcon.classList.add('scanning');
-    elements.statusPulse.className = 'pulse-dot scanning';
-    elements.scannerStatusText.textContent = 'Taranıyor...';
-    elements.progressTrack.classList.add('active');
+    if (elements.radarIcon) elements.radarIcon.classList.add('scanning');
+    if (elements.statusPulse) elements.statusPulse.className = 'pulse-dot scanning';
+    if (elements.scannerStatusText) elements.scannerStatusText.textContent = 'Taranıyor...';
+    if (elements.progressTrack) elements.progressTrack.classList.add('active');
   } else {
-    elements.radarIcon.classList.remove('scanning');
-    elements.statusPulse.className = 'pulse-dot idle';
-    elements.scannerStatusText.textContent = 'Tamamlandı / Hazır';
-    elements.progressTrack.classList.remove('active');
+    if (elements.radarIcon) elements.radarIcon.classList.remove('scanning');
+    if (elements.statusPulse) elements.statusPulse.className = 'pulse-dot idle';
+    if (elements.scannerStatusText) elements.scannerStatusText.textContent = 'Tamamlandı / Hazır';
+    if (elements.progressTrack) elements.progressTrack.classList.remove('active');
   }
 }
 
 function updateProgressUI(p) {
-  elements.statScanned.textContent = `${p.scannedIps} / ${p.totalIps}`;
-  elements.statAlive.textContent = p.aliveIps;
-  elements.statTime.textContent = `${p.elapsedSec.toFixed(1)}s`;
-  elements.progressFill.style.width = `${p.percent.toFixed(1)}%`;
-  elements.countAll.textContent = p.aliveIps;
+  if (elements.statScanned) elements.statScanned.textContent = `${p.scannedIps} / ${p.totalIps}`;
+  if (elements.statAlive) elements.statAlive.textContent = p.aliveIps;
+  if (elements.statTime) elements.statTime.textContent = `${p.elapsedSec.toFixed(1)}s`;
+  if (elements.progressFill) elements.progressFill.style.width = `${p.percent.toFixed(1)}%`;
+  if (elements.countAll) elements.countAll.textContent = p.aliveIps;
 }
 
 // Render Table with Search & Filters
