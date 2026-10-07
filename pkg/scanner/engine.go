@@ -20,6 +20,7 @@ type Engine struct {
 	localIPs     map[string]bool
 	gatewayIP    string
 	lastProgress ScanProgress
+	ssdpMap      sync.Map
 }
 
 // NewEngine creates a new Engine instance
@@ -138,8 +139,37 @@ func (e *Engine) Start(parentCtx context.Context, opts ScanOptions, onProgress f
 		portsToScan = append(portsToScan, opts.ExtraPorts...)
 	}
 
+	// Launch SSDP/UPnP discovery in parallel
+	go func() {
+		devices := DiscoverSSDP(ctx, 1500*time.Millisecond)
+		for ip, dev := range devices {
+			e.ssdpMap.Store(ip, dev)
+		}
+		e.enrichHostsWithARP()
+	}()
+
+	// Periodic ARP cache refresh during scan so MACs populate live
+	ticker := time.NewTicker(600 * time.Millisecond)
+	tickerDone := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				_, _ = e.arpCache.Refresh()
+				e.enrichHostsWithARP()
+			case <-tickerDone:
+				ticker.Stop()
+				return
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+
 	go func() {
 		defer func() {
+			close(tickerDone)
 			atomic.StoreInt32(&e.isScanning, 0)
 			// Final ARP refresh to catch any newly populated MAC entries
 			_, _ = e.arpCache.Refresh()
@@ -265,24 +295,43 @@ func (e *Engine) scanSingleIP(ctx context.Context, ip string, opts ScanOptions, 
 		host.OpenPorts = openPorts
 	}
 
+	// Attach SSDP model metadata if discovered
+	if val, ok := e.ssdpMap.Load(ip); ok {
+		if dev, okDev := val.(SSDPDevice); okDev && dev.Model != "" {
+			host.Model = dev.Model
+		}
+	}
+
 	// Classify device type
 	host.DeviceType = ClassifyDevice(host)
 
 	return host
 }
 
-// enrichHostsWithARP does a post-scan pass to fill any MAC addresses that populated late
+// enrichHostsWithARP does a pass to fill any MAC addresses and SSDP models that populated late
 func (e *Engine) enrichHostsWithARP() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	for _, host := range e.hosts {
+		updated := false
 		if host.MAC == "" {
 			if mac, ok := e.arpCache.Get(host.IP); ok && mac != "" {
 				host.MAC = mac
 				host.Vendor = LookupVendor(mac)
-				host.DeviceType = ClassifyDevice(host)
+				updated = true
 			}
+		}
+		if host.Model == "" {
+			if val, ok := e.ssdpMap.Load(host.IP); ok {
+				if dev, okDev := val.(SSDPDevice); okDev && dev.Model != "" {
+					host.Model = dev.Model
+					updated = true
+				}
+			}
+		}
+		if updated {
+			host.DeviceType = ClassifyDevice(host)
 		}
 	}
 }

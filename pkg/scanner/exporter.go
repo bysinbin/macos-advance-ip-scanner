@@ -19,7 +19,9 @@ func ExportCSV(hosts []Host) ([]byte, error) {
 	header := []string{
 		"IP Address",
 		"Status",
+		"Custom Name",
 		"Hostname",
+		"Model",
 		"NetBIOS",
 		"mDNS",
 		"MAC Address",
@@ -27,6 +29,7 @@ func ExportCSV(hosts []Host) ([]byte, error) {
 		"Device Type",
 		"Ping Latency (ms)",
 		"Open Ports",
+		"Comments",
 		"Is Gateway",
 	}
 	if err := writer.Write(header); err != nil {
@@ -44,7 +47,9 @@ func ExportCSV(hosts []Host) ([]byte, error) {
 		row := []string{
 			h.IP,
 			string(h.Status),
+			h.CustomName,
 			h.Hostname,
+			h.Model,
 			h.NetBIOS,
 			h.MDNSName,
 			h.MAC,
@@ -52,6 +57,7 @@ func ExportCSV(hosts []Host) ([]byte, error) {
 			string(h.DeviceType),
 			strconv.FormatFloat(h.PingTimeMs, 'f', 2, 64),
 			strings.Join(ports, "; "),
+			h.Comments,
 			strconv.FormatBool(h.IsGateway),
 		}
 		if err := writer.Write(row); err != nil {

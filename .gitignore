@@ -20,3 +20,4 @@ scan-*.txt
 *.exe
 *.test
 *.out
+aliases.json

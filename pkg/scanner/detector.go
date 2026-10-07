@@ -155,6 +155,10 @@ func ParseIPRange(raw string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid CIDR: %w", err)
 		}
+		ones, _ := ipNet.Mask.Size()
+		if ones < 16 {
+			return nil, fmt.Errorf("CIDR subnet too large (/%d, maximum supported is /16)", ones)
+		}
 		return enumerateCIDR(ipNet), nil
 	}
 

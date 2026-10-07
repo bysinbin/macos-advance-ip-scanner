@@ -13,10 +13,12 @@ echo "🔨 Derleme başlatılıyor: ${APP_NAME}..."
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 go build -ldflags="-s -w" -o "${MACOS_DIR}/macos-advance-ip-scanner" main.go
 
-# Copy Info.plist
+# Copy Info.plist and Icon
 cp scripts/Info.plist "${CONTENTS_DIR}/Info.plist"
+if [ -f "scripts/AppIcon.icns" ]; then
+    cp scripts/AppIcon.icns "${RESOURCES_DIR}/AppIcon.icns"
+fi
 
-# Generate simple ICNS / icon placeholder if needed
 chmod +x "${MACOS_DIR}/macos-advance-ip-scanner"
 
 echo "✅ Başarıyla oluşturuldu: ${BUNDLE_DIR}"

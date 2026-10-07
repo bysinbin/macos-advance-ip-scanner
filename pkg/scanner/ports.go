@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net"
@@ -138,11 +139,13 @@ func ScanPorts(ctx context.Context, ip string, ports []int, timeout time.Duratio
 
 			conn, err := dialer.DialContext(ctx, "tcp", target)
 			if err == nil {
-				_ = conn.Close()
 				service := WellKnownServices[port]
 				if service == "" {
 					service = "Unknown"
 				}
+
+				banner := grabBanner(conn, ip, port, 400*time.Millisecond)
+				_ = conn.Close()
 
 				mu.Lock()
 				results = append(results, PortInfo{
@@ -150,6 +153,7 @@ func ScanPorts(ctx context.Context, ip string, ports []int, timeout time.Duratio
 					Service:  service,
 					Protocol: "tcp",
 					IsOpen:   true,
+					Banner:   banner,
 				})
 				mu.Unlock()
 			}
@@ -165,6 +169,47 @@ func ScanPorts(ctx context.Context, ip string, ports []int, timeout time.Duratio
 	return results
 }
 
+// grabBanner captures the service identification string or HTTP title
+func grabBanner(conn net.Conn, ip string, port int, timeout time.Duration) string {
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	reader := bufio.NewReader(conn)
+
+	switch port {
+	case 21, 22, 25, 110, 143:
+		// Service announces banner immediately upon connect
+		line, err := reader.ReadString('\n')
+		if err == nil {
+			return strings.TrimSpace(line)
+		}
+	case 80, 8080, 8000, 3000, 5000:
+		// Simple HTTP probe
+		req := fmt.Sprintf("GET / HTTP/1.0\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (Macintosh)\r\nConnection: close\r\n\r\n", ip)
+		_, _ = conn.Write([]byte(req))
+
+		buf := make([]byte, 1024)
+		n, err := reader.Read(buf)
+		if err == nil && n > 0 {
+			raw := string(buf[:n])
+			for _, line := range strings.Split(raw, "\r\n") {
+				if strings.HasPrefix(strings.ToLower(line), "server:") {
+					return strings.TrimSpace(strings.TrimPrefix(line, "Server:"))
+				}
+			}
+			lower := strings.ToLower(raw)
+			if start := strings.Index(lower, "<title>"); start != -1 {
+				if end := strings.Index(lower[start:], "</title>"); end != -1 {
+					title := raw[start+7 : start+end]
+					title = strings.TrimSpace(title)
+					if len(title) > 0 && len(title) < 50 {
+						return "Title: " + title
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // ClassifyDevice attempts to identify device category based on vendor, open ports, and name
 func ClassifyDevice(h *Host) DeviceType {
 	if h.IsGateway {
@@ -172,7 +217,18 @@ func ClassifyDevice(h *Host) DeviceType {
 	}
 
 	v := strings.ToLower(h.Vendor)
-	name := strings.ToLower(h.Hostname + " " + h.NetBIOS + " " + h.MDNSName)
+	name := strings.ToLower(h.Hostname + " " + h.NetBIOS + " " + h.MDNSName + " " + h.Model)
+
+	// Check model first if SSDP / UPnP found it
+	if strings.Contains(name, "smart tv") || strings.Contains(name, "sonos") || strings.Contains(name, "hue") {
+		return DeviceIoT
+	}
+	if strings.Contains(name, "nas") || strings.Contains(name, "synology") || strings.Contains(name, "qnap") {
+		return DeviceServer
+	}
+	if strings.Contains(name, "router") || strings.Contains(name, "gateway") || strings.Contains(name, "access point") {
+		return DeviceRouter
+	}
 
 	// Check open ports
 	openMap := make(map[int]bool)

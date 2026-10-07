@@ -21,28 +21,25 @@ type ProbeResult struct {
 	Method     string // "icmp", "tcp", "arp"
 }
 
-// FastTCPPorts to check if ICMP is blocked by firewall
+// Limit concurrent external ping processes to prevent macOS process starvation
+var pingProcessSem = make(chan struct{}, 16)
+
+// FastTCPPorts to check if host is alive via TCP SYN / RST
 var fastTCPProbePorts = []int{80, 443, 22, 445, 135, 139, 8080, 53, 3389, 5900}
 
-// ProbeHost checks if a host is reachable using ICMP, TCP SYN-connect, and ARP
+// ProbeHost checks if a host is reachable using TCP probe, ARP, and fallback ICMP ping
 func ProbeHost(ctx context.Context, ip string, timeout time.Duration, arpCache *ARPCache) ProbeResult {
 	if timeout <= 0 {
 		timeout = 350 * time.Millisecond
 	}
 
-	// 1. Try ICMP ping first
-	icmpRes, err := pingICMP(ctx, ip, timeout)
-	if err == nil && icmpRes.Alive {
-		return icmpRes
-	}
-
-	// 2. If ICMP didn't respond (common with Windows Firewall), try rapid TCP probe on common ports
+	// 1. Rapid TCP probe on common ports first (Pure Go sockets, zero child process overhead)
 	tcpRes := probeTCP(ctx, ip, timeout)
 	if tcpRes.Alive {
 		return tcpRes
 	}
 
-	// 3. Check if ARP table has a confirmed valid MAC address for this IP
+	// 2. Check if ARP table has a confirmed valid MAC address for this IP
 	if arpCache != nil {
 		if mac, ok := arpCache.Get(ip); ok && mac != "" && !strings.Contains(mac, "INCOMPLETE") {
 			return ProbeResult{
@@ -53,11 +50,24 @@ func ProbeHost(ctx context.Context, ip string, timeout time.Duration, arpCache *
 		}
 	}
 
+	// 3. Fallback to ICMP ping for hosts that have all TCP ports stealth/firewalled
+	icmpRes, err := pingICMP(ctx, ip, timeout)
+	if err == nil && icmpRes.Alive {
+		return icmpRes
+	}
+
 	return ProbeResult{Alive: false}
 }
 
-// pingICMP executes macOS /sbin/ping
+// pingICMP executes macOS /sbin/ping with process throttling
 func pingICMP(ctx context.Context, ip string, timeout time.Duration) (ProbeResult, error) {
+	select {
+	case pingProcessSem <- struct{}{}:
+		defer func() { <-pingProcessSem }()
+	case <-ctx.Done():
+		return ProbeResult{Alive: false}, ctx.Err()
+	}
+
 	timeoutMs := int(timeout.Milliseconds())
 	if timeoutMs < 100 {
 		timeoutMs = 100

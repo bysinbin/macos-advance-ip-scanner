@@ -12,12 +12,24 @@ const state = {
   searchQuery: '',
   sortField: 'ip',
   sortAsc: true,
+  currentView: 'table', // 'table' | 'topology'
   eventSource: null,
   activeModalHost: null,
   activePingInterval: null,
+  pingLatencyHistory: [],
+  previousScanIPs: new Set(JSON.parse(localStorage.getItem('scanner_prev_ips') || '[]')),
   settings: {
     timeoutMs: 350,
     concurrency: 50,
+  },
+  topology: {
+    panX: 0,
+    panY: 0,
+    isDragging: false,
+    dragStartX: 0,
+    dragStartY: 0,
+    hoveredNode: null,
+    animId: null,
   }
 };
 
@@ -47,10 +59,20 @@ const elements = {
   clearSearchBtn: document.getElementById('clearSearchBtn'),
   filterChips: document.getElementById('filterChips'),
   countAll: document.getElementById('countAll'),
+  countNew: document.getElementById('countNew'),
   hostsTable: document.getElementById('hostsTable'),
   hostsTableBody: document.getElementById('hostsTableBody'),
   emptyStateRow: document.getElementById('emptyStateRow'),
   toastContainer: document.getElementById('toastContainer'),
+
+  // View switchers
+  viewTableBtn: document.getElementById('viewTableBtn'),
+  viewTopologyBtn: document.getElementById('viewTopologyBtn'),
+  tableViewContainer: document.getElementById('tableViewContainer'),
+  topologyViewContainer: document.getElementById('topologyViewContainer'),
+  topologyCanvas: document.getElementById('topologyCanvas'),
+  resetTopologyBtn: document.getElementById('resetTopologyBtn'),
+  topolAliveCount: document.getElementById('topolAliveCount'),
 
   // Device Modal
   deviceModal: document.getElementById('deviceModal'),
@@ -61,11 +83,15 @@ const elements = {
   modalIP: document.getElementById('modalIP'),
   modalMAC: document.getElementById('modalMAC'),
   modalVendor: document.getElementById('modalVendor'),
+  modalModel: document.getElementById('modalModel'),
   modalType: document.getElementById('modalType'),
   modalHostname: document.getElementById('modalHostname'),
   modalNetBIOS: document.getElementById('modalNetBIOS'),
   modalLatency: document.getElementById('modalLatency'),
   modalRole: document.getElementById('modalRole'),
+  modalAliasInput: document.getElementById('modalAliasInput'),
+  modalNotesInput: document.getElementById('modalNotesInput'),
+  saveAliasBtn: document.getElementById('saveAliasBtn'),
   modalPortsList: document.getElementById('modalPortsList'),
   modalRescanPortsBtn: document.getElementById('modalRescanPortsBtn'),
   modalActionHttp: document.getElementById('modalActionHttp'),
@@ -80,6 +106,9 @@ const elements = {
   pingSentCount: document.getElementById('pingSentCount'),
   pingSuccessCount: document.getElementById('pingSuccessCount'),
   pingAvgLatency: document.getElementById('pingAvgLatency'),
+  pingMinLatency: document.getElementById('pingMinLatency'),
+  pingMaxLatency: document.getElementById('pingMaxLatency'),
+  pingCanvas: document.getElementById('pingCanvas'),
   pingLogTerminal: document.getElementById('pingLogTerminal'),
   togglePingTestBtn: document.getElementById('togglePingTestBtn'),
 
@@ -98,6 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchInterfaces();
   setupEventListeners();
   initEventSource();
+  initTopology();
 });
 
 // Theme Management
@@ -111,6 +141,7 @@ function initTheme() {
     document.documentElement.setAttribute('data-theme', target);
     localStorage.setItem('theme', target);
     showToast(`Tema ${target === 'dark' ? 'Karanlık' : 'Aydınlık'} olarak ayarlandı`, 'info');
+    if (state.currentView === 'topology') renderTopology();
   });
 }
 
@@ -128,24 +159,22 @@ async function fetchInterfaces() {
     state.interfaces.forEach((iface) => {
       const opt = document.createElement('option');
       opt.value = iface.name;
-      opt.textContent = `${iface.name} - ${iface.ip} (${iface.cidr})`;
-      elements.ifaceSelect.appendChild(opt);
-
+      opt.textContent = `${iface.name} - ${iface.ip} (${iface.cidr || ''})`;
       if (iface.isDefault) {
+        opt.textContent += ' [Varsayılan]';
         defaultIface = iface;
       }
+      elements.ifaceSelect.appendChild(opt);
     });
-
-    if (!defaultIface && state.interfaces.length > 0) {
-      defaultIface = state.interfaces[0];
-    }
 
     if (defaultIface) {
       elements.ifaceSelect.value = defaultIface.name;
       selectInterface(defaultIface);
+    } else if (state.interfaces.length > 0) {
+      selectInterface(state.interfaces[0]);
     }
   } catch (err) {
-    showToast('Ağ arayüzleri algılanamadı: ' + err.message, 'error');
+    showToast('Ağ arayüzleri taranamadı: ' + err.message, 'error');
   }
 }
 
@@ -153,39 +182,59 @@ function selectInterface(iface) {
   state.selectedIface = iface;
   if (iface.startIp && iface.endIp) {
     elements.ipRangeInput.value = `${iface.startIp}-${iface.endIp}`;
+  } else if (iface.cidr) {
+    elements.ipRangeInput.value = iface.cidr;
   }
   if (iface.gatewayIp) {
     elements.statGateway.textContent = iface.gatewayIp;
-  } else {
-    elements.statGateway.textContent = '-';
   }
 }
 
 // Setup Event Listeners
 function setupEventListeners() {
-  // Interface selection changed
   elements.ifaceSelect.addEventListener('change', (e) => {
-    const selected = state.interfaces.find(i => i.name === e.target.value);
-    if (selected) selectInterface(selected);
+    const iface = state.interfaces.find(i => i.name === e.target.value);
+    if (iface) selectInterface(iface);
   });
 
-  // Auto-detect button
   elements.detectSubnetBtn.addEventListener('click', () => {
     if (state.selectedIface) {
       selectInterface(state.selectedIface);
-      showToast(`Alt ağ ${state.selectedIface.startIp}-${state.selectedIface.endIp} olarak belirlendi`, 'info');
+      showToast('Alt ağ aralığı yenilendi', 'info');
     }
   });
 
-  // Start & Stop Scan
   elements.startScanBtn.addEventListener('click', startScan);
   elements.stopScanBtn.addEventListener('click', stopScan);
 
-  // Search filter
+  // View Switcher (Table vs Topology)
+  elements.viewTableBtn.addEventListener('click', () => switchView('table'));
+  elements.viewTopologyBtn.addEventListener('click', () => switchView('topology'));
+
+  // Export Dropdown
+  elements.exportDropdownBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    elements.exportMenu.classList.toggle('hidden');
+  });
+
+  document.addEventListener('click', () => {
+    elements.exportMenu.classList.add('hidden');
+  });
+
+  elements.exportMenu.querySelectorAll('.menu-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const format = btn.dataset.format;
+      window.location.href = `/api/export?format=${format}`;
+      showToast(`Rapor indiriliyor (.${format})`, 'info');
+    });
+  });
+
+  // Search & Filter
   elements.searchInput.addEventListener('input', (e) => {
-    state.searchQuery = e.target.value.toLowerCase().trim();
-    elements.clearSearchBtn.classList.toggle('hidden', state.searchQuery === '');
+    state.searchQuery = e.target.value.trim().toLowerCase();
+    elements.clearSearchBtn.classList.toggle('hidden', !state.searchQuery);
     renderHostsTable();
+    if (state.currentView === 'topology') renderTopology();
   });
 
   elements.clearSearchBtn.addEventListener('click', () => {
@@ -193,20 +242,21 @@ function setupEventListeners() {
     state.searchQuery = '';
     elements.clearSearchBtn.classList.add('hidden');
     renderHostsTable();
+    if (state.currentView === 'topology') renderTopology();
   });
 
-  // Chips filter
-  elements.filterChips.addEventListener('click', (e) => {
-    const chip = e.target.closest('.chip');
-    if (!chip) return;
-    elements.filterChips.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-    chip.classList.add('active');
-    state.activeFilter = chip.dataset.filter;
-    renderHostsTable();
+  elements.filterChips.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      elements.filterChips.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      state.activeFilter = chip.dataset.filter;
+      renderHostsTable();
+      if (state.currentView === 'topology') renderTopology();
+    });
   });
 
-  // Table Column Sorting
-  elements.hostsTable.querySelectorAll('thead th[data-sort]').forEach(th => {
+  // Table Sorting
+  elements.hostsTable.querySelectorAll('th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
       const field = th.dataset.sort;
       if (state.sortField === field) {
@@ -219,25 +269,7 @@ function setupEventListeners() {
     });
   });
 
-  // Export Menu
-  elements.exportDropdownBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    elements.exportMenu.classList.toggle('hidden');
-  });
-
-  document.addEventListener('click', () => {
-    elements.exportMenu.classList.add('hidden');
-  });
-
-  elements.exportMenu.addEventListener('click', (e) => {
-    const item = e.target.closest('.menu-item');
-    if (!item) return;
-    const format = item.dataset.format;
-    window.location.href = `/api/export?format=${format}`;
-    showToast(`${format.toUpperCase()} raporu indiriliyor...`, 'success');
-  });
-
-  // Modals Light-Dismiss & Close
+  // Modal Closers
   elements.closeDeviceModalBtn.addEventListener('click', () => elements.deviceModal.close());
   elements.deviceModal.addEventListener('click', (e) => {
     if (e.target === elements.deviceModal) elements.deviceModal.close();
@@ -246,6 +278,34 @@ function setupEventListeners() {
   elements.closePingModalBtn.addEventListener('click', closePingModal);
   elements.pingModal.addEventListener('click', (e) => {
     if (e.target === elements.pingModal) closePingModal();
+  });
+
+  // Save Custom Alias / Notes
+  elements.saveAliasBtn.addEventListener('click', async () => {
+    if (!state.activeModalHost) return;
+    const host = state.activeModalHost;
+    const alias = elements.modalAliasInput.value.trim();
+    const notes = elements.modalNotesInput.value.trim();
+    const targetID = host.mac || host.ip;
+
+    try {
+      const res = await fetch('/api/hosts/alias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: targetID, alias, notes })
+      });
+      const data = await res.json();
+      if (data.success) {
+        host.customName = alias;
+        host.comments = notes;
+        state.hosts.set(host.ip, host);
+        renderHostsTable();
+        if (state.currentView === 'topology') renderTopology();
+        showToast('Cihaz tanımı başarıyla kaydedildi', 'success');
+      }
+    } catch (err) {
+      showToast('Kaydetme hatası: ' + err.message, 'error');
+    }
   });
 
   // Settings Modal
@@ -296,18 +356,15 @@ function setupEventListeners() {
     }
   });
 
-  // Modal Actions
+  // Modal Quick Actions
   elements.modalActionHttp.addEventListener('click', () => {
     if (!state.activeModalHost) return;
-    const ip = state.activeModalHost.ip;
-    window.open(`http://${ip}`, '_blank');
+    window.open(`http://${state.activeModalHost.ip}`, '_blank');
   });
 
   elements.modalActionSSH.addEventListener('click', () => {
     if (!state.activeModalHost) return;
-    const ip = state.activeModalHost.ip;
-    navigator.clipboard.writeText(`ssh ${ip}`);
-    showToast(`SSH komutu kopyalandı: ssh ${ip}`, 'info');
+    copyText(`ssh ${state.activeModalHost.ip}`, `SSH komutu kopyalandı: ssh ${state.activeModalHost.ip}`);
   });
 
   elements.modalActionPing.addEventListener('click', () => {
@@ -338,6 +395,23 @@ function setupEventListeners() {
   });
 }
 
+// Switch between Table and Topology view
+function switchView(view) {
+  state.currentView = view;
+  if (view === 'table') {
+    elements.viewTableBtn.classList.add('active');
+    elements.viewTopologyBtn.classList.remove('active');
+    elements.tableViewContainer.classList.remove('hidden');
+    elements.topologyViewContainer.classList.add('hidden');
+  } else {
+    elements.viewTableBtn.classList.remove('active');
+    elements.viewTopologyBtn.classList.add('active');
+    elements.tableViewContainer.classList.add('hidden');
+    elements.topologyViewContainer.classList.remove('hidden');
+    renderTopology();
+  }
+}
+
 // Setup Server-Sent Events (SSE)
 function initEventSource() {
   if (state.eventSource) state.eventSource.close();
@@ -349,8 +423,12 @@ function initEventSource() {
     try {
       const data = JSON.parse(e.data);
       if (data.hosts && data.hosts.length > 0) {
-        data.hosts.forEach(h => state.hosts.set(h.ip, h));
+        data.hosts.forEach(h => {
+          checkIfNewDevice(h);
+          state.hosts.set(h.ip, h);
+        });
         renderHostsTable();
+        if (state.currentView === 'topology') renderTopology();
       }
       if (data.isScanning) {
         setScanningUIState(true);
@@ -372,10 +450,28 @@ function initEventSource() {
   es.addEventListener('host_found', (e) => {
     try {
       const host = JSON.parse(e.data);
+      checkIfNewDevice(host);
       state.hosts.set(host.ip, host);
       renderHostsTable();
+      if (state.currentView === 'topology') renderTopology();
     } catch (err) {
       console.error('Host found error', err);
+    }
+  });
+
+  es.addEventListener('alias_updated', (e) => {
+    try {
+      const item = JSON.parse(e.data);
+      state.hosts.forEach(h => {
+        if (h.ip === item.id || h.mac === item.id) {
+          h.customName = item.alias;
+          h.comments = item.notes;
+        }
+      });
+      renderHostsTable();
+      if (state.currentView === 'topology') renderTopology();
+    } catch (err) {
+      console.error('Alias updated error', err);
     }
   });
 
@@ -385,14 +481,22 @@ function initEventSource() {
       setScanningUIState(false);
       updateProgressUI(p);
       showToast(`Tarama tamamlandı: ${p.aliveIps} aktif cihaz bulundu (${p.elapsedSec.toFixed(1)}s)`, 'success');
+
+      // Save scanned IPs for next scan diffing
+      const currentAlive = Array.from(state.hosts.keys());
+      if (currentAlive.length > 0) {
+        localStorage.setItem('scanner_prev_ips', JSON.stringify(currentAlive));
+      }
     } catch (err) {
       console.error('Finished error', err);
     }
   });
+}
 
-  es.onerror = () => {
-    // SSE will automatically attempt reconnection
-  };
+function checkIfNewDevice(host) {
+  if (state.previousScanIPs.size > 0 && !state.previousScanIPs.has(host.ip)) {
+    host.isNew = true;
+  }
 }
 
 // Scan API Operations
@@ -414,7 +518,6 @@ async function startScan() {
   };
 
   try {
-    // Reset table for clean scan
     state.hosts.clear();
     renderHostsTable();
     setScanningUIState(true);
@@ -454,17 +557,19 @@ function setScanningUIState(isScanning) {
   state.isScanning = isScanning;
   elements.startScanBtn.disabled = isScanning;
   elements.stopScanBtn.disabled = !isScanning;
-  elements.ipRangeInput.disabled = isScanning;
   elements.ifaceSelect.disabled = isScanning;
+  elements.ipRangeInput.disabled = isScanning;
 
   if (isScanning) {
     elements.radarIcon.classList.add('scanning');
     elements.statusPulse.className = 'pulse-dot scanning';
     elements.scannerStatusText.textContent = 'Taranıyor...';
+    elements.progressTrack.classList.add('active');
   } else {
     elements.radarIcon.classList.remove('scanning');
     elements.statusPulse.className = 'pulse-dot idle';
-    elements.scannerStatusText.textContent = 'Hazır';
+    elements.scannerStatusText.textContent = 'Tamamlandı / Hazır';
+    elements.progressTrack.classList.remove('active');
   }
 }
 
@@ -473,31 +578,39 @@ function updateProgressUI(p) {
   elements.statAlive.textContent = p.aliveIps;
   elements.statTime.textContent = `${p.elapsedSec.toFixed(1)}s`;
   elements.progressFill.style.width = `${p.percent.toFixed(1)}%`;
+  elements.countAll.textContent = p.aliveIps;
 }
 
-// Render Results Table
+// Render Table with Search & Filters
 function renderHostsTable() {
-  const hostsArray = Array.from(state.hosts.values());
-  elements.countAll.textContent = hostsArray.length;
+  const hosts = Array.from(state.hosts.values());
+  elements.countAll.textContent = hosts.length;
+
+  let newCount = 0;
+  hosts.forEach(h => { if (h.isNew) newCount++; });
+  if (elements.countNew) elements.countNew.textContent = newCount;
+  if (elements.topolAliveCount) elements.topolAliveCount.textContent = hosts.length;
 
   // Filter hosts
-  const filtered = hostsArray.filter(host => {
-    // 1. Text Search Filter
+  const filtered = hosts.filter(host => {
     if (state.searchQuery) {
       const q = state.searchQuery;
-      const matchIP = host.ip.includes(q);
-      const matchMAC = (host.mac || '').toLowerCase().includes(q);
-      const matchHost = (host.hostname || '').toLowerCase().includes(q);
-      const matchVendor = (host.vendor || '').toLowerCase().includes(q);
-      const matchPorts = (host.openPorts || []).some(p => p.port.toString().includes(q) || p.service.toLowerCase().includes(q));
-
-      if (!matchIP && !matchMAC && !matchHost && !matchVendor && !matchPorts) {
-        return false;
-      }
+      const match =
+        (host.ip || '').toLowerCase().includes(q) ||
+        (host.hostname || '').toLowerCase().includes(q) ||
+        (host.customName || '').toLowerCase().includes(q) ||
+        (host.model || '').toLowerCase().includes(q) ||
+        (host.mac || '').toLowerCase().includes(q) ||
+        (host.vendor || '').toLowerCase().includes(q) ||
+        (host.deviceType || '').toLowerCase().includes(q) ||
+        (host.comments || '').toLowerCase().includes(q) ||
+        (host.openPorts || []).some(p => p.port.toString().includes(q) || p.service.toLowerCase().includes(q));
+      if (!match) return false;
     }
 
-    // 2. Chip Filter
     switch (state.activeFilter) {
+      case 'new':
+        return !!host.isNew;
       case 'router':
         return host.isGateway || host.deviceType === 'Router / Gateway';
       case 'computer':
@@ -536,7 +649,6 @@ function renderHostsTable() {
     return 0;
   });
 
-  // Update DOM Table
   elements.hostsTableBody.innerHTML = '';
 
   if (filtered.length === 0) {
@@ -552,10 +664,8 @@ function renderHostsTable() {
     tr.className = 'host-row';
     tr.dataset.ip = h.ip;
 
-    // Type icon
-    const icon = getDeviceIcon(h.deviceType, h.vendor);
+    const icon = getDeviceIcon(h.deviceType, h.vendor, h.model);
 
-    // Latency badge class
     let latClass = 'latency-badge';
     if (h.pingTimeMs > 40) latClass += ' med';
     if (h.pingTimeMs > 120) latClass += ' slow';
@@ -573,20 +683,29 @@ function renderHostsTable() {
             clickAttr = `onclick="window.open('${proto}://${h.ip}:${p.port}', '_blank'); event.stopPropagation();" title="${p.service} (Tarayıcıda Aç)"`;
           } else if (p.port === 22 || p.port === 3389 || p.port === 5900) {
             pillClass += ' remote';
-            clickAttr = `title="${p.service} Bağlantısı"`;
+            clickAttr = `title="${p.service} (${p.banner || 'Açık Port'})"`;
           }
-          return `<span class="${pillClass}" ${clickAttr}>${p.port} ${p.service}</span>`;
+          const bannerText = p.banner ? ` (${p.banner.slice(0, 15)})` : '';
+          return `<span class="${pillClass}" ${clickAttr}>${p.port} ${p.service}${bannerText}</span>`;
         }).join('') +
         `</div>`;
     }
 
-    // Role tags
+    // Role tags & New badge
     let roleTags = '';
-    if (h.isGateway) {
-      roleTags += `<span class="role-tag gw" title="Ağ Geçidi (Default Gateway)">GW</span>`;
+    if (h.isGateway) roleTags += `<span class="role-tag gw" title="Ağ Geçidi">GW</span>`;
+    if (h.isLocalHost) roleTags += `<span class="role-tag me" title="Bu Bilgisayar">BU MAC</span>`;
+    if (h.isNew) roleTags += `<span class="badge-new">YENİ</span>`;
+
+    // Hostname / Alias / Model
+    let nameHTML = '';
+    if (h.customName) {
+      nameHTML += `<span class="custom-name-text">🏷️ ${escapeHTML(h.customName)}</span>`;
     }
-    if (h.isLocalHost) {
-      roleTags += `<span class="role-tag me" title="Bu Bilgisayar (Bu Mac)">BU MAC</span>`;
+    const mainName = h.hostname || h.netbios || h.mdnsName || '-';
+    nameHTML += `<span class="font-mono text-primary">${escapeHTML(mainName)}</span>`;
+    if (h.model) {
+      nameHTML += `<span class="badge-model">${escapeHTML(h.model)}</span>`;
     }
 
     tr.innerHTML = `
@@ -599,15 +718,15 @@ function renderHostsTable() {
         <span class="type-badge">${icon} ${h.deviceType || 'Cihaz'}</span>
       </td>
       <td class="col-ip">
-        <a class="ip-link" href="javascript:void(0)" onclick="copyText('${h.ip}', 'IP kopyalandı'); event.stopPropagation();" title="Tıkla ve IP'yi Kopyala">
+        <a class="ip-link" href="javascript:void(0)" onclick="copyText('${h.ip}', 'IP kopyalandı'); event.stopPropagation();" title="IP'yi Kopyala">
           ${h.ip} ${roleTags}
         </a>
       </td>
       <td class="col-hostname">
-        <span class="font-mono text-primary">${escapeHTML(h.hostname || h.netbios || '-')}</span>
+        ${nameHTML}
       </td>
       <td class="col-mac">
-        <span class="mac-val" onclick="copyText('${h.mac || ''}', 'MAC adresi kopyalandı'); event.stopPropagation();" title="Tıkla ve Kopyala">
+        <span class="mac-val" onclick="copyText('${h.mac || ''}', 'MAC adresi kopyalandı'); event.stopPropagation();" title="MAC Kopyala">
           ${h.mac || '<span class="text-muted">-</span>'}
         </span>
       </td>
@@ -647,10 +766,10 @@ function openDeviceModal(ip) {
   if (!host) return;
 
   state.activeModalHost = host;
-  const icon = getDeviceIcon(host.deviceType, host.vendor);
+  const icon = getDeviceIcon(host.deviceType, host.vendor, host.model);
 
   elements.modalDeviceIcon.textContent = icon;
-  elements.modalDeviceTitle.textContent = host.hostname || host.vendor || 'Cihaz Detayları';
+  elements.modalDeviceTitle.textContent = host.customName || host.hostname || host.model || host.vendor || 'Cihaz Detayları';
   elements.modalDeviceIP.textContent = host.ip;
 
   elements.modalIP.textContent = host.ip;
@@ -660,10 +779,14 @@ function openDeviceModal(ip) {
   elements.modalMAC.onclick = () => copyText(host.mac || '', 'MAC adresi kopyalandı');
 
   elements.modalVendor.textContent = host.vendor || 'Bilinmiyor';
+  elements.modalModel.textContent = host.model || '-';
   elements.modalType.textContent = host.deviceType || 'Cihaz';
   elements.modalHostname.textContent = host.hostname || '-';
   elements.modalNetBIOS.textContent = host.netbios || '-';
   elements.modalLatency.textContent = host.pingTimeMs ? `${host.pingTimeMs.toFixed(2)} ms` : '<1 ms';
+
+  elements.modalAliasInput.value = host.customName || '';
+  elements.modalNotesInput.value = host.comments || '';
 
   let roleStr = 'İstemci Cihaz';
   if (host.isGateway) roleStr = 'Ağ Geçidi / Modem / Router';
@@ -684,7 +807,8 @@ function renderModalPorts(ports, ip) {
     let proto = (p.port === 443 || p.port === 8443) ? 'https' : 'http';
     let isWeb = (p.port === 80 || p.port === 443 || p.port === 8080 || p.port === 8000 || p.port === 3000);
     let clickAttr = isWeb ? `onclick="window.open('${proto}://${ip}:${p.port}', '_blank')"` : '';
-    return `<span class="port-pill ${isWeb ? 'web' : ''}" ${clickAttr} title="${p.service}">${p.port} / ${p.service}</span>`;
+    let banner = p.banner ? ` <small class="text-muted">(${escapeHTML(p.banner)})</small>` : '';
+    return `<span class="port-pill ${isWeb ? 'web' : ''}" ${clickAttr} title="${p.service}">${p.port} / ${p.service}${banner}</span>`;
   }).join('');
 }
 
@@ -694,13 +818,19 @@ function openPingModal(ip) {
   elements.pingSentCount.textContent = '0';
   elements.pingSuccessCount.textContent = '0';
   elements.pingAvgLatency.textContent = '0 ms';
+  elements.pingMinLatency.textContent = '-';
+  elements.pingMaxLatency.textContent = '-';
   elements.pingLogTerminal.innerHTML = `<div class="terminal-line text-muted">${ip} için canlı ping başlatıldı...</div>`;
 
+  state.pingLatencyHistory = [];
+  drawPingCanvas();
   elements.pingModal.showModal();
 
   let sent = 0;
   let success = 0;
   let totalLatency = 0;
+  let minLat = 999999;
+  let maxLat = 0;
 
   const runPing = async () => {
     sent++;
@@ -717,12 +847,24 @@ function openPingModal(ip) {
       if (data.alive) {
         success++;
         totalLatency += data.latencyMs;
+        if (data.latencyMs < minLat) minLat = data.latencyMs;
+        if (data.latencyMs > maxLat) maxLat = data.latencyMs;
+
         const avg = (totalLatency / success).toFixed(1);
         elements.pingSuccessCount.textContent = success;
         elements.pingAvgLatency.textContent = `${avg} ms`;
+        elements.pingMinLatency.textContent = `${minLat.toFixed(1)} ms`;
+        elements.pingMaxLatency.textContent = `${maxLat.toFixed(1)} ms`;
+
+        state.pingLatencyHistory.push(data.latencyMs);
+        if (state.pingLatencyHistory.length > 35) state.pingLatencyHistory.shift();
+        drawPingCanvas();
 
         appendPingTerminal(`64 bayt ${ip} adresinden yanıt: süre=${data.latencyMs.toFixed(2)}ms`, 'text-emerald');
       } else {
+        state.pingLatencyHistory.push(null);
+        if (state.pingLatencyHistory.length > 35) state.pingLatencyHistory.shift();
+        drawPingCanvas();
         appendPingTerminal(`${ip} için istek zaman aşımına uğradı.`, 'text-rose');
       }
     } catch (err) {
@@ -748,6 +890,84 @@ function openPingModal(ip) {
   };
 }
 
+function drawPingCanvas() {
+  const canvas = elements.pingCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 560;
+  const h = canvas.clientHeight || 110;
+
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+  }
+
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  // Background grid
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+  ctx.lineWidth = 1;
+  for (let y = 20; y < h; y += 25) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+
+  const history = state.pingLatencyHistory;
+  if (history.length < 2) {
+    ctx.restore();
+    return;
+  }
+
+  const validPoints = history.filter(v => v !== null);
+  const maxVal = Math.max(...validPoints, 30);
+  const stepX = w / (history.length - 1);
+
+  // Path coordinates
+  const coords = history.map((val, idx) => {
+    const x = idx * stepX;
+    if (val === null) return { x, y: h - 5, isDrop: true };
+    const y = h - 10 - ((val / (maxVal * 1.2)) * (h - 25));
+    return { x, y: Math.max(8, y), isDrop: false };
+  });
+
+  // Gradient fill area under curve
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(16, 185, 129, 0.35)');
+  grad.addColorStop(1, 'rgba(16, 185, 129, 0.0)');
+
+  ctx.beginPath();
+  ctx.moveTo(coords[0].x, h);
+  coords.forEach(pt => ctx.lineTo(pt.x, pt.y));
+  ctx.lineTo(coords[coords.length - 1].x, h);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line stroke
+  ctx.beginPath();
+  ctx.moveTo(coords[0].x, coords[0].y);
+  coords.forEach(pt => ctx.lineTo(pt.x, pt.y));
+  ctx.strokeStyle = '#10b981';
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Plot dots
+  coords.forEach(pt => {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, pt.isDrop ? 3 : 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = pt.isDrop ? '#f43f5e' : '#34d399';
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
 function appendPingTerminal(text, colorClass = '') {
   const line = document.createElement('div');
   line.className = `terminal-line ${colorClass}`;
@@ -764,15 +984,249 @@ function closePingModal() {
   elements.pingModal.close();
 }
 
+// Network Topology Interactive Visualizer
+function initTopology() {
+  const canvas = elements.topologyCanvas;
+  if (!canvas) return;
+
+  canvas.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Check if clicked a node
+    const clicked = getNodeAt(mouseX, mouseY);
+    if (clicked) {
+      openDeviceModal(clicked.ip);
+      return;
+    }
+
+    state.topology.isDragging = true;
+    state.topology.dragStartX = e.clientX - state.topology.panX;
+    state.topology.dragStartY = e.clientY - state.topology.panY;
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (state.topology.isDragging) {
+      state.topology.panX = e.clientX - state.topology.dragStartX;
+      state.topology.panY = e.clientY - state.topology.dragStartY;
+      renderTopology();
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const node = getNodeAt(mouseX, mouseY);
+    if (node !== state.topology.hoveredNode) {
+      state.topology.hoveredNode = node;
+      canvas.style.cursor = node ? 'pointer' : 'grab';
+      renderTopology();
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    state.topology.isDragging = false;
+  });
+
+  elements.resetTopologyBtn.addEventListener('click', () => {
+    state.topology.panX = 0;
+    state.topology.panY = 0;
+    renderTopology();
+  });
+
+  window.addEventListener('resize', () => {
+    if (state.currentView === 'topology') renderTopology();
+  });
+}
+
+function getNodeAt(x, y) {
+  const dpr = window.devicePixelRatio || 1;
+  const nodes = state.topology.nodes || [];
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i];
+    const dx = x - (n.x + state.topology.panX);
+    const dy = y - (n.y + state.topology.panY);
+    if (Math.sqrt(dx * dx + dy * dy) <= (n.radius + 6)) {
+      return n;
+    }
+  }
+  return null;
+}
+
+function renderTopology() {
+  const canvas = elements.topologyCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 480;
+
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+  }
+
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const hosts = Array.from(state.hosts.values());
+  if (hosts.length === 0) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.font = '14px var(--font-sans)';
+    ctx.textAlign = 'center';
+    ctx.fillText('Henüz aktif cihaz tespit edilmedi. Yukarıdaki "Tara" butonuna tıklayın.', w / 2, h / 2);
+    ctx.restore();
+    return;
+  }
+
+  const cx = w / 2 + state.topology.panX;
+  const cy = h / 2 + state.topology.panY;
+
+  // Identify Gateway or primary host
+  const gateway = hosts.find(h => h.isGateway) || hosts[0];
+  const clients = hosts.filter(h => h.ip !== gateway.ip);
+
+  // Concentric orbit rings
+  const ring1Radius = Math.min(w, h) * 0.35;
+  ctx.strokeStyle = 'rgba(59, 130, 246, 0.12)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 6]);
+  ctx.beginPath();
+  ctx.arc(cx, cy, ring1Radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Calculate nodes
+  const nodes = [];
+  nodes.push({
+    ip: gateway.ip,
+    name: gateway.customName || gateway.hostname || 'Gateway',
+    type: 'gateway',
+    deviceType: gateway.deviceType,
+    vendor: gateway.vendor,
+    model: gateway.model,
+    x: w / 2,
+    y: h / 2,
+    radius: 24,
+    color: '#3b82f6',
+    icon: '🌐'
+  });
+
+  const totalClients = clients.length;
+  clients.forEach((c, idx) => {
+    const angle = (idx / totalClients) * (Math.PI * 2) - Math.PI / 2;
+    // Vary radius slightly for aesthetic balance
+    const r = ring1Radius + (idx % 2 === 0 ? -15 : 20);
+    const nx = w / 2 + Math.cos(angle) * r;
+    const ny = h / 2 + Math.sin(angle) * r;
+
+    let col = '#0ea5e9'; // default blue
+    if ((c.vendor || '').toLowerCase().includes('apple')) col = '#a855f7';
+    if (c.deviceType === 'Printer') col = '#10b981';
+    if (c.deviceType === 'Smart / IoT Device') col = '#f59e0b';
+    if (c.deviceType === 'Server / NAS') col = '#f43f5e';
+    if (c.deviceType === 'Mobile / Tablet') col = '#ec4899';
+
+    nodes.push({
+      ip: c.ip,
+      name: c.customName || c.hostname || c.model || c.vendor || c.ip,
+      type: 'client',
+      deviceType: c.deviceType,
+      vendor: c.vendor,
+      model: c.model,
+      x: nx,
+      y: ny,
+      radius: 16,
+      color: col,
+      icon: getDeviceIcon(c.deviceType, c.vendor, c.model)
+    });
+  });
+
+  state.topology.nodes = nodes;
+
+  // Draw connecting laser lines from gateway to clients
+  nodes.slice(1).forEach(n => {
+    const startX = cx;
+    const startY = cy;
+    const endX = n.x + state.topology.panX;
+    const endY = n.y + state.topology.panY;
+
+    const grad = ctx.createLinearGradient(startX, startY, endX, endY);
+    grad.addColorStop(0, 'rgba(59, 130, 246, 0.4)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0.1)');
+
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  });
+
+  // Draw Nodes
+  nodes.forEach(n => {
+    const drawX = n.x + state.topology.panX;
+    const drawY = n.y + state.topology.panY;
+    const isHovered = (state.topology.hoveredNode && state.topology.hoveredNode.ip === n.ip);
+    const r = isHovered ? n.radius + 4 : n.radius;
+
+    // Glowing aura
+    const glow = ctx.createRadialGradient(drawX, drawY, r * 0.4, drawX, drawY, r * 2);
+    glow.addColorStop(0, n.color + '44');
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(drawX, drawY, r * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Node body
+    ctx.fillStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.arc(drawX, drawY, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = n.color;
+    ctx.lineWidth = isHovered ? 3 : 2;
+    ctx.stroke();
+
+    // Node Icon
+    ctx.font = `${Math.floor(r * 0.9)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(n.icon, drawX, drawY);
+
+    // Label below node
+    ctx.fillStyle = isHovered ? '#ffffff' : '#cbd5e1';
+    ctx.font = `${isHovered ? '600 ' : ''}11px var(--font-sans)`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    const displayName = n.name.length > 18 ? n.name.slice(0, 15) + '...' : n.name;
+    ctx.fillText(displayName, drawX, drawY + r + 5);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.font = '10px var(--font-mono)';
+    ctx.fillText(n.ip, drawX, drawY + r + 18);
+  });
+
+  ctx.restore();
+}
+
 // Helpers
-function getDeviceIcon(type, vendor) {
-  vendor = (vendor || '').toLowerCase();
+function getDeviceIcon(type, vendor, model) {
+  const combined = ((vendor || '') + ' ' + (model || '')).toLowerCase();
   if (type === 'Router / Gateway') return '🌐';
   if (type === 'Printer') return '🖨️';
   if (type === 'Mobile / Tablet') return '📱';
-  if (type === 'Smart / IoT Device') return '💡';
+  if (type === 'Smart / IoT Device') {
+    if (combined.includes('tv')) return '📺';
+    if (combined.includes('speaker') || combined.includes('sonos')) return '🔊';
+    return '💡';
+  }
   if (type === 'Server / NAS') return '🗄️';
-  if (vendor.includes('apple')) return '🍎';
+  if (combined.includes('apple')) return '🍎';
   return '💻';
 }
 

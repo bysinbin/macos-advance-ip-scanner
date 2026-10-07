@@ -33,6 +33,7 @@ type PortInfo struct {
 	Protocol    string `json:"protocol"` // "tcp"
 	IsOpen      bool   `json:"isOpen"`
 	Description string `json:"description,omitempty"`
+	Banner      string `json:"banner,omitempty"`
 }
 
 // Host represents a discovered network device
@@ -43,6 +44,8 @@ type Host struct {
 	MDNSName    string       `json:"mdnsName,omitempty"`
 	MAC         string       `json:"mac"`
 	Vendor      string       `json:"vendor"`
+	Model       string       `json:"model,omitempty"`
+	CustomName  string       `json:"customName,omitempty"`
 	Status      HostStatus   `json:"status"`
 	PingTimeMs  float64      `json:"pingTimeMs"`
 	OpenPorts   []PortInfo   `json:"openPorts"`

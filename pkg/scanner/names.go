@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,49 +24,67 @@ func ResolveNames(ctx context.Context, ip string, timeout time.Duration) NameRes
 		timeout = 400 * time.Millisecond
 	}
 
-	result := NameResolutionResult{}
+	var (
+		mu         sync.Mutex
+		reverseDNS string
+		mdnsName   string
+		netbios    string
+	)
 
-	// Run reverse DNS and NetBIOS in parallel
-	done := make(chan struct{}, 2)
+	var wg sync.WaitGroup
+	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	// 1. Reverse DNS
+	wg.Add(1)
 	go func() {
-		defer func() { done <- struct{}{} }()
-		// Use net.DefaultResolver with timeout
+		defer wg.Done()
 		resolver := &net.Resolver{
 			PreferGo: false, // On macOS, use C library/mDNSResponder for .local support
 		}
-		lookupCtx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-
 		names, err := resolver.LookupAddr(lookupCtx, ip)
 		if err == nil && len(names) > 0 {
 			clean := strings.TrimSuffix(names[0], ".")
-			result.ReverseDNS = clean
+			mu.Lock()
+			reverseDNS = clean
 			if strings.HasSuffix(clean, ".local") {
-				result.MDNS = strings.TrimSuffix(clean, ".local")
+				mdnsName = strings.TrimSuffix(clean, ".local")
 			}
+			mu.Unlock()
 		}
 	}()
 
 	// 2. NetBIOS Node Status Query (UDP 137)
+	wg.Add(1)
 	go func() {
-		defer func() { done <- struct{}{} }()
+		defer wg.Done()
 		nbName := queryNetBIOS(ip, timeout)
 		if nbName != "" {
-			result.NetBIOS = nbName
+			mu.Lock()
+			netbios = nbName
+			mu.Unlock()
 		}
 	}()
 
-	// Wait for both or timeout
-	for i := 0; i < 2; i++ {
-		select {
-		case <-done:
-		case <-time.After(timeout + 50*time.Millisecond):
-			break
-		case <-ctx.Done():
-			break
-		}
+	// Wait for both or context timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-lookupCtx.Done():
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	result := NameResolutionResult{
+		ReverseDNS: reverseDNS,
+		MDNS:        mdnsName,
+		NetBIOS:     netbios,
 	}
 
 	// Select best primary name

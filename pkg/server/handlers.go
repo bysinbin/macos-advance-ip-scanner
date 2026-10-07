@@ -94,6 +94,7 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 
 	err := s.engine.Start(context.Background(), opts, func(p scanner.ScanProgress) {
 		if p.Discovered != nil {
+			s.enrichHostWithAlias(p.Discovered)
 			s.BroadcastSSE("host_found", p.Discovered)
 		}
 		s.BroadcastSSE("progress", p)
@@ -130,6 +131,9 @@ func (s *Server) handleScanStop(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	hosts := s.engine.GetHosts()
+	for i := range hosts {
+		s.enrichHostWithAlias(&hosts[i])
+	}
 	isScanning := s.engine.IsScanning()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -165,9 +169,13 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Send initial status ping
+	hosts := s.engine.GetHosts()
+	for i := range hosts {
+		s.enrichHostWithAlias(&hosts[i])
+	}
 	initialStatus := map[string]interface{}{
 		"isScanning": s.engine.IsScanning(),
-		"hosts":      s.engine.GetHosts(),
+		"hosts":      hosts,
 	}
 	initialBytes, _ := json.Marshal(initialStatus)
 	_, _ = fmt.Fprintf(w, "event: initial_state\ndata: %s\n\n", string(initialBytes))
@@ -294,6 +302,9 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hosts := s.engine.GetHosts()
+	for i := range hosts {
+		s.enrichHostWithAlias(&hosts[i])
+	}
 	timestamp := time.Now().Format("20060102-150405")
 
 	switch format {
@@ -327,3 +338,57 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unsupported format. Use csv, json, or txt", http.StatusBadRequest)
 	}
 }
+
+type aliasRequest struct {
+	ID    string `json:"id"`    // IP or MAC
+	Alias string `json:"alias"` // Friendly device name
+	Notes string `json:"notes"` // Extra notes / comments
+}
+
+func (s *Server) handleAliases(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == http.MethodGet {
+		s.aliasesMu.RLock()
+		defer s.aliasesMu.RUnlock()
+		_ = json.NewEncoder(w).Encode(s.aliases)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req aliasRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+
+		if req.ID == "" {
+			http.Error(w, "id (IP or MAC) is required", http.StatusBadRequest)
+			return
+		}
+
+		s.aliasesMu.Lock()
+		s.aliases[req.ID] = HostAlias{
+			Alias: req.Alias,
+			Notes: req.Notes,
+		}
+		s.aliasesMu.Unlock()
+		s.saveAliases()
+
+		// Broadcast alias update
+		s.BroadcastSSE("alias_updated", map[string]string{
+			"id":    req.ID,
+			"alias": req.Alias,
+			"notes": req.Notes,
+		})
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Alias saved successfully",
+		})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+

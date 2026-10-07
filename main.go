@@ -164,8 +164,14 @@ func runCLIScan(targetRange string, scanPorts, deepScan bool, extraPortsStr stri
 			if len(vendorStr) > 22 {
 				vendorStr = vendorStr[:19] + "..."
 			}
+			displayName := d.Hostname
+			if d.CustomName != "" {
+				displayName = d.CustomName
+			} else if displayName == "" && d.Model != "" {
+				displayName = d.Model
+			}
 			fmt.Printf("  [+] Bulundu: %-15s | %-17s | %-22s | %-20s (%.1fms)\n",
-				d.IP, macStr, vendorStr, d.Hostname, d.PingTimeMs)
+				d.IP, macStr, vendorStr, displayName, d.PingTimeMs)
 		}
 
 		// Progress line update
@@ -190,7 +196,7 @@ func runCLIScan(targetRange string, scanPorts, deepScan bool, extraPortsStr stri
 	fmt.Printf("\n\n✅ Tarama Tamamlandı! %d aktif cihaz bulundu.\n\n", len(hosts))
 
 	// Print Results Table
-	fmt.Printf("%-16s %-18s %-22s %-20s %-8s %-16s\n", "IP Adresi", "MAC Adresi", "Üretici", "Cihaz Adı", "Gecikme", "Açık Portlar")
+	fmt.Printf("%-16s %-18s %-22s %-20s %-8s %-16s\n", "IP Adresi", "MAC Adresi", "Üretici", "Cihaz / Model", "Gecikme", "Açık Portlar")
 	fmt.Println(strings.Repeat("-", 108))
 
 	for _, h := range hosts {
@@ -213,6 +219,11 @@ func runCLIScan(targetRange string, scanPorts, deepScan bool, extraPortsStr stri
 			vendor = vendor[:18] + "..."
 		}
 		hostName := h.Hostname
+		if h.CustomName != "" {
+			hostName = h.CustomName
+		} else if hostName == "" && h.Model != "" {
+			hostName = h.Model
+		}
 		if len(hostName) > 19 {
 			hostName = hostName[:16] + "..."
 		}

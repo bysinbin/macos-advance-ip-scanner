@@ -196,6 +196,7 @@
 
       <div class="filter-chips" id="filterChips">
         <button class="chip active" data-filter="all">Tümü (<span id="countAll">0</span>)</button>
+        <button class="chip chip-new" data-filter="new">🟢 Yeni (<span id="countNew">0</span>)</button>
         <button class="chip" data-filter="router">Ağ Geçidi & Router</button>
         <button class="chip" data-filter="computer">Bilgisayarlar</button>
         <button class="chip" data-filter="mobile">Mobil Cihazlar</button>
@@ -203,10 +204,21 @@
         <button class="chip" data-filter="iot">Akıllı / IoT</button>
         <button class="chip" data-filter="hasPorts">Açık Portu Olanlar</button>
       </div>
+
+      <div class="view-toggle-wrap">
+        <button id="viewTableBtn" class="btn-toggle active" title="Tablo Görünümü">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+          <span>Tablo</span>
+        </button>
+        <button id="viewTopologyBtn" class="btn-toggle" title="Ağ Topolojisi Haritası">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><circle cx="5" cy="6" r="2"></circle><circle cx="19" cy="6" r="2"></circle><circle cx="5" cy="18" r="2"></circle><circle cx="19" cy="18" r="2"></circle><line x1="12" y1="9" x2="5" y2="6"></line><line x1="12" y1="9" x2="19" y2="6"></line><line x1="12" y1="15" x2="5" y2="18"></line><line x1="12" y1="15" x2="19" y2="18"></line></svg>
+          <span>Topoloji Haritası</span>
+        </button>
+      </div>
     </section>
 
     <!-- Main Results Table -->
-    <main class="table-container glass-card">
+    <main class="table-container glass-card" id="tableViewContainer">
       <table class="hosts-table" id="hostsTable">
         <thead>
           <tr>
@@ -241,6 +253,26 @@
         </tbody>
       </table>
     </main>
+
+    <!-- Interactive Network Topology Canvas Section -->
+    <section class="topology-container glass-card hidden" id="topologyViewContainer">
+      <div class="topology-toolbar">
+        <div class="topology-stats">
+          <span>Ağ Haritası: <strong id="topolAliveCount">0</strong> Aktif Düğüm</span>
+          <span class="text-muted">(Düğümlere tıklayarak detayları açabilirsiniz)</span>
+        </div>
+        <button id="resetTopologyBtn" class="btn-subtle-sm" title="Harita görünümünü yeniden ortala">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+          </svg>
+          <span>Yeniden Odakla</span>
+        </button>
+      </div>
+      <div class="topology-canvas-wrap">
+        <canvas id="topologyCanvas"></canvas>
+      </div>
+    </section>
   </div>
 
   <!-- Device Details Modal (<dialog>) -->
@@ -290,6 +322,26 @@
           <div class="detail-item">
             <span class="detail-label">Ağ Rolü</span>
             <span class="detail-value" id="modalRole">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Model / Donanım</span>
+            <span class="detail-value text-emerald font-semibold" id="modalModel">-</span>
+          </div>
+        </div>
+
+        <!-- Custom Alias & Notes Editor -->
+        <div class="modal-alias-section">
+          <h3>Özel Cihaz Tanımı & Notlar</h3>
+          <div class="alias-inputs-row">
+            <div class="alias-input-col">
+              <label for="modalAliasInput" class="mini-label">Özel İsim (Alias):</label>
+              <input type="text" id="modalAliasInput" class="text-input" placeholder="Örn: Salon TV, Ofis Sunucusu...">
+            </div>
+            <div class="alias-input-col">
+              <label for="modalNotesInput" class="mini-label">Notlar:</label>
+              <input type="text" id="modalNotesInput" class="text-input" placeholder="Cihaz hakkında açıklama veya not...">
+            </div>
+            <button id="saveAliasBtn" class="btn btn-primary" title="Kaydet">Kaydet</button>
           </div>
         </div>
 
@@ -366,6 +418,11 @@
           <div>Gönderilen: <strong id="pingSentCount">0</strong></div>
           <div>Başarılı: <strong class="text-emerald" id="pingSuccessCount">0</strong></div>
           <div>Ortalama: <strong class="font-mono" id="pingAvgLatency">0 ms</strong></div>
+          <div>Min: <strong class="font-mono" id="pingMinLatency">0 ms</strong></div>
+          <div>Maks: <strong class="font-mono" id="pingMaxLatency">0 ms</strong></div>
+        </div>
+        <div class="ping-canvas-wrap">
+          <canvas id="pingCanvas" width="560" height="110"></canvas>
         </div>
         <div class="ping-log-terminal" id="pingLogTerminal">
           <div class="terminal-line text-muted">Ping testi başlatılıyor...</div>

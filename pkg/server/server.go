@@ -6,11 +6,18 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"macos-advance-ip-scanner/pkg/scanner"
 )
+
+// HostAlias represents a user-assigned alias and note for a device
+type HostAlias struct {
+	Alias string `json:"alias"`
+	Notes string `json:"notes"`
+}
 
 // Server coordinates HTTP API, SSE streaming, and static files
 type Server struct {
@@ -21,6 +28,8 @@ type Server struct {
 	staticFS   fs.FS
 	httpServer *http.Server
 	port       int
+	aliasesMu  sync.RWMutex
+	aliases    map[string]HostAlias
 }
 
 // NewServer initializes a new Server
@@ -31,8 +40,10 @@ func NewServer(port int, staticFS fs.FS) *Server {
 		clients:  make(map[chan string]bool),
 		staticFS: staticFS,
 		port:     port,
+		aliases:  make(map[string]HostAlias),
 	}
 
+	s.loadAliases()
 	s.registerRoutes()
 	return s
 }
@@ -96,6 +107,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/action/ping", s.handlePing)
 	s.mux.HandleFunc("/api/action/ports", s.handlePortScan)
 	s.mux.HandleFunc("/api/export", s.handleExport)
+	s.mux.HandleFunc("/api/hosts/alias", s.handleAliases)
 
 	// Static UI file server
 	if s.staticFS != nil {
@@ -122,3 +134,44 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+func (s *Server) loadAliases() {
+	s.aliasesMu.Lock()
+	defer s.aliasesMu.Unlock()
+	s.aliases = make(map[string]HostAlias)
+	data, err := os.ReadFile("aliases.json")
+	if err == nil {
+		_ = json.Unmarshal(data, &s.aliases)
+	}
+}
+
+func (s *Server) saveAliases() {
+	s.aliasesMu.RLock()
+	data, err := json.MarshalIndent(s.aliases, "", "  ")
+	s.aliasesMu.RUnlock()
+	if err == nil {
+		_ = os.WriteFile("aliases.json", data, 0644)
+	}
+}
+
+func (s *Server) enrichHostWithAlias(h *scanner.Host) {
+	if h == nil {
+		return
+	}
+	s.aliasesMu.RLock()
+	defer s.aliasesMu.RUnlock()
+
+	// Check MAC first, then IP
+	if h.MAC != "" {
+		if entry, ok := s.aliases[h.MAC]; ok {
+			h.CustomName = entry.Alias
+			h.Comments = entry.Notes
+			return
+		}
+	}
+	if entry, ok := s.aliases[h.IP]; ok {
+		h.CustomName = entry.Alias
+		h.Comments = entry.Notes
+	}
+}
+
