@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,6 +19,8 @@ type Engine struct {
 	isScanning   int32
 	cancelFunc   context.CancelFunc
 	localIPs     map[string]bool
+	localMACs    map[string]string
+	localNets    []*net.IPNet
 	gatewayIP    string
 	lastProgress ScanProgress
 	ssdpMap      sync.Map
@@ -26,9 +29,10 @@ type Engine struct {
 // NewEngine creates a new Engine instance
 func NewEngine() *Engine {
 	return &Engine{
-		arpCache: NewARPCache(),
-		hosts:    make(map[string]*Host),
-		localIPs: make(map[string]bool),
+		arpCache:  NewARPCache(),
+		hosts:     make(map[string]*Host),
+		localIPs:  make(map[string]bool),
+		localMACs: make(map[string]string),
 	}
 }
 
@@ -99,19 +103,40 @@ func (e *Engine) Start(parentCtx context.Context, opts ScanOptions, onProgress f
 	// Detect local interfaces & gateway
 	ifaces, _ := DetectInterfaces()
 	localIPMap := make(map[string]bool)
+	localMACMap := make(map[string]string)
+	var localNets []*net.IPNet
 	var defaultGw string
 	for _, iface := range ifaces {
 		localIPMap[iface.IP] = true
+		if iface.HardwareMAC != "" {
+			localMACMap[iface.IP] = iface.HardwareMAC
+		}
+		if _, ipNet, err := net.ParseCIDR(iface.CIDR); err == nil && ipNet != nil {
+			localNets = append(localNets, ipNet)
+		}
 		if iface.IsDefault && iface.GatewayIP != "" {
 			defaultGw = iface.GatewayIP
 		}
 	}
 	e.mu.Lock()
 	e.localIPs = localIPMap
+	e.localMACs = localMACMap
+	e.localNets = localNets
 	e.gatewayIP = defaultGw
 	e.mu.Unlock()
 
-	// Populate initial ARP cache
+	// High-speed parallel UDP sweep to pre-warm the OS kernel ARP table
+	TriggerFastUDPSweep(ctx, targetIPs)
+
+	// Allow kernel to receive and record ARP replies
+	select {
+	case <-ctx.Done():
+		atomic.StoreInt32(&e.isScanning, 0)
+		return nil
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	// Populate fresh ARP cache from kernel table
 	_, _ = e.arpCache.Refresh()
 
 	// Setup worker pool
@@ -211,7 +236,9 @@ func (e *Engine) Start(parentCtx context.Context, opts ScanOptions, onProgress f
 						e.mu.Unlock()
 					}
 
-					if onProgress != nil {
+					// Throttle progress events to prevent SSE buffer overflow:
+					// Emit immediately when a host is found, or every 5 dead IPs, or on the final IP.
+					if onProgress != nil && (host != nil || curScanned%5 == 0 || curScanned == int64(total)) {
 						pct := (float64(curScanned) / float64(total)) * 100.0
 						if pct > 100.0 {
 							pct = 100.0
@@ -246,9 +273,36 @@ func (e *Engine) Start(parentCtx context.Context, opts ScanOptions, onProgress f
 	return nil
 }
 
+// isLocalSubnet checks if an IP belongs to any locally configured network interface
+func (e *Engine) isLocalSubnet(ipStr string) bool {
+	parsed := net.ParseIP(ipStr)
+	if parsed == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, ipNet := range e.localNets {
+		if ipNet.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
 // scanSingleIP scans a single IP address
 func (e *Engine) scanSingleIP(ctx context.Context, ip string, opts ScanOptions, portsToScan []int) *Host {
-	probe := ProbeHost(ctx, ip, opts.Timeout, e.arpCache)
+	e.mu.RLock()
+	isLocalHost := e.localIPs[ip]
+	e.mu.RUnlock()
+
+	var probe ProbeResult
+	if isLocalHost {
+		probe = ProbeResult{Alive: true, LatencyMs: 0.1, Method: "localhost"}
+	} else {
+		isLocal := e.isLocalSubnet(ip)
+		probe = ProbeHost(ctx, ip, opts.Timeout, e.arpCache, isLocal)
+	}
+
 	if !probe.Alive {
 		return nil
 	}
@@ -260,23 +314,31 @@ func (e *Engine) scanSingleIP(ctx context.Context, ip string, opts ScanOptions, 
 		PingTimeMs:  probe.LatencyMs,
 		LastSeen:    time.Now(),
 		IsGateway:   (ip == e.gatewayIP),
-		IsLocalHost: e.localIPs[ip],
+		IsLocalHost: isLocalHost,
 	}
 
 	// Try reading MAC from ARP
-	if mac, ok := e.arpCache.Get(ip); ok && mac != "" {
+	if mac, ok := e.arpCache.Get(ip); ok && mac != "" && !strings.Contains(strings.ToUpper(mac), "INCOMPLETE") {
 		host.MAC = mac
 		host.Vendor = LookupVendor(mac)
 	}
 
 	// If it's localhost and MAC not found in ARP, get it from local interface
 	if host.IsLocalHost && host.MAC == "" {
-		ifaces, _ := DetectInterfaces()
-		for _, iface := range ifaces {
-			if iface.IP == ip {
-				host.MAC = iface.HardwareMAC
-				host.Vendor = LookupVendor(iface.HardwareMAC)
-				break
+		e.mu.RLock()
+		localMAC := e.localMACs[ip]
+		e.mu.RUnlock()
+		if localMAC != "" {
+			host.MAC = localMAC
+			host.Vendor = LookupVendor(localMAC)
+		} else {
+			ifaces, _ := DetectInterfaces()
+			for _, iface := range ifaces {
+				if iface.IP == ip {
+					host.MAC = iface.HardwareMAC
+					host.Vendor = LookupVendor(iface.HardwareMAC)
+					break
+				}
 			}
 		}
 	}

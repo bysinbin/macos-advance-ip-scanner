@@ -88,10 +88,17 @@ func (s *Server) BroadcastSSE(eventType string, data interface{}) {
 	defer s.clientsMu.Unlock()
 
 	for ch := range s.clients {
-		select {
-		case ch <- msg:
-		default:
-			// If buffer is full, drop or let next tick handle
+		if eventType == "host_found" || eventType == "finished" || eventType == "alias_updated" {
+			select {
+			case ch <- msg:
+			case <-time.After(30 * time.Millisecond):
+			}
+		} else {
+			select {
+			case ch <- msg:
+			default:
+				// Only drop high-frequency progress ticks if consumer is slow
+			}
 		}
 	}
 }
@@ -102,6 +109,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/scan/start", s.handleScanStart)
 	s.mux.HandleFunc("/api/scan/stop", s.handleScanStop)
 	s.mux.HandleFunc("/api/scan/status", s.handleScanStatus)
+	s.mux.HandleFunc("/api/hosts", s.handleScanStatus)
 	s.mux.HandleFunc("/api/scan/events", s.handleSSE)
 	s.mux.HandleFunc("/api/action/wol", s.handleWakeOnLAN)
 	s.mux.HandleFunc("/api/action/ping", s.handlePing)

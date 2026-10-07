@@ -487,6 +487,22 @@ function initEventSource() {
       if (currentAlive.length > 0) {
         localStorage.setItem('scanner_prev_ips', JSON.stringify(currentAlive));
       }
+
+      // Sync all discovered hosts from backend on completion
+      fetch('/api/scan/status')
+        .then(res => res.json())
+        .then(data => {
+          const list = Array.isArray(data) ? data : (data.hosts || []);
+          if (list && list.length > 0) {
+            list.forEach(h => {
+              checkIfNewDevice(h);
+              state.hosts.set(h.ip, h);
+            });
+            renderHostsTable();
+            if (state.currentView === 'topology') renderTopology();
+          }
+        })
+        .catch(() => {});
     } catch (err) {
       console.error('Finished error', err);
     }

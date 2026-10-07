@@ -22,7 +22,21 @@ func LookupVendor(mac string) string {
 		return vendor
 	}
 
+	// Check if this is an IEEE 802 locally administered / randomized MAC (common on modern iOS, macOS, Android)
+	if isPrivateMAC(clean) {
+		return "Apple / Device (Private Wi-Fi Address)"
+	}
+
 	return "Unknown Manufacturer"
+}
+
+// isPrivateMAC checks if the second least-significant bit of the first byte is 1 (locally administered)
+func isPrivateMAC(clean string) bool {
+	if len(clean) < 2 {
+		return false
+	}
+	c := clean[1]
+	return c == '2' || c == '6' || c == 'A' || c == 'E'
 }
 
 // shortOuiTable for common broad vendor blocks
@@ -126,6 +140,43 @@ var ouiTable = map[string]string{
 	"8086F2": "Intel Corporation",
 	"A0C589": "Intel Corporation",
 	"AC7289": "Intel Corporation",
+	"DC41A9": "Intel Corporation",
+
+	// Espressif (ESP8266, ESP32 IoT / Smart Home Devices)
+	"841FE8": "Espressif Inc.",
+	"18FE34": "Espressif Inc.",
+	"240AC4": "Espressif Inc.",
+	"2462AB": "Espressif Inc.",
+	"246F28": "Espressif Inc.",
+	"24B2DE": "Espressif Inc.",
+	"24DCC3": "Espressif Inc.",
+	"2C3AE8": "Espressif Inc.",
+	"30AEA4": "Espressif Inc.",
+	"3C6105": "Espressif Inc.",
+	"4022D8": "Espressif Inc.",
+	"404CCA": "Espressif Inc.",
+	"483FDA": "Espressif Inc.",
+	"485519": "Espressif Inc.",
+	"5C0272": "Espressif Inc.",
+	"6055F9": "Espressif Inc.",
+	"68B6B3": "Espressif Inc.",
+	"68C63A": "Espressif Inc.",
+	"807D3A": "Espressif Inc.",
+	"840D8E": "Espressif Inc.",
+	"84F3EB": "Espressif Inc.",
+	"94B97E": "Espressif Inc.",
+	"A0B765": "Espressif Inc.",
+	"A47B9D": "Espressif Inc.",
+	"A4CF12": "Espressif Inc.",
+	"AC67B2": "Espressif Inc.",
+	"BCDD4F": "Espressif Inc.",
+	"C44F33": "Espressif Inc.",
+	"CC50E3": "Espressif Inc.",
+	"DC4F22": "Espressif Inc.",
+	"E05A1B": "Espressif Inc.",
+	"E6EF60": "Espressif Inc. / Smart Home",
+	"E868E7": "Espressif Inc.",
+	"F4CF74": "Espressif Inc.",
 
 	// Samsung
 	"0000F0": "Samsung Electronics",
@@ -208,29 +259,6 @@ var ouiTable = map[string]string{
 	"D4A651": "Tuya Smart Inc.",
 	"E8DB84": "Tuya Smart Inc.",
 
-	// Espressif (ESP8266 / ESP32 IoT chips)
-	"18FE34": "Espressif Inc.",
-	"240AC4": "Espressif Inc.",
-	"246F28": "Espressif Inc.",
-	"24B2DE": "Espressif Inc.",
-	"2C3AE8": "Espressif Inc.",
-	"30AEA4": "Espressif Inc.",
-	"3C6105": "Espressif Inc.",
-	"483FDA": "Espressif Inc.",
-	"485519": "Espressif Inc.",
-	"5C0272": "Espressif Inc.",
-	"68C63A": "Espressif Inc.",
-	"840D8E": "Espressif Inc.",
-	"84F3EB": "Espressif Inc.",
-	"94B97E": "Espressif Inc.",
-	"A4CF12": "Espressif Inc.",
-	"AC67B2": "Espressif Inc.",
-	"BCDD4F": "Espressif Inc.",
-	"C44F33": "Espressif Inc.",
-	"CC50E3": "Espressif Inc.",
-	"DC4F22": "Espressif Inc.",
-	"E6EF60": "Espressif Inc. / Smart Home",
-
 	// Raspberry Pi
 	"B827EB": "Raspberry Pi Foundation",
 	"DCA632": "Raspberry Pi Foundation",
@@ -311,6 +339,14 @@ var ouiTable = map[string]string{
 	"2C4D54": "ASUSTek Computer",
 	"382C4A": "ASUSTek Computer",
 	"40167E": "ASUSTek Computer",
+	"50465D": "ASUSTek Computer",
+	"704D7B": "ASUSTek Computer",
+	"A036BC": "ASUSTek Computer",
+	"001FC6": "ASUSTek Computer",
+	"04D9F5": "ASUSTek Computer",
+	"086266": "ASUSTek Computer",
+	"14DDA9": "ASUSTek Computer",
+	"305A3A": "ASUSTek Computer",
 
 	// Netgear
 	"00095B": "Netgear",

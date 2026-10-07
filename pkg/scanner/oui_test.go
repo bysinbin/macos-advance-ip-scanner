@@ -14,6 +14,9 @@ func TestLookupVendor(t *testing.T) {
 		{"B8:27:EB:11:22:33", "Raspberry Pi Foundation"},
 		{"00:00:0C:11:22:33", "Cisco Systems"},
 		{"00:1A:11:22:33:44", "Google, Inc."},
+		{"A0:36:BC:AA:BB:CC", "ASUSTek Computer"},
+		{"84:1F:E8:11:22:33", "Espressif Inc."},
+		{"76:ED:AB:33:44:55", "Apple / Device (Private Wi-Fi Address)"},
 		{"XX:YY:ZZ:11:22:33", "Unknown Manufacturer"},
 		{"00", "Unknown"},
 	}

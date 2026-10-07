@@ -156,7 +156,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	msgChan := make(chan string, 32)
+	msgChan := make(chan string, 512)
 	s.clientsMu.Lock()
 	s.clients[msgChan] = true
 	s.clientsMu.Unlock()

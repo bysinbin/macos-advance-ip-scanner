@@ -22,35 +22,96 @@ type ProbeResult struct {
 }
 
 // Limit concurrent external ping processes to prevent macOS process starvation
-var pingProcessSem = make(chan struct{}, 16)
+var pingProcessSem = make(chan struct{}, 64)
 
 // FastTCPPorts to check if host is alive via TCP SYN / RST
 var fastTCPProbePorts = []int{80, 443, 22, 445, 135, 139, 8080, 53, 3389, 5900}
 
-// ProbeHost checks if a host is reachable using TCP probe, ARP, and fallback ICMP ping
-func ProbeHost(ctx context.Context, ip string, timeout time.Duration, arpCache *ARPCache) ProbeResult {
+// TriggerFastUDPSweep sends rapid unprivileged UDP probes to all target IPs.
+// This triggers the macOS kernel to broadcast ARP requests for all target IPs on the local network.
+func TriggerFastUDPSweep(ctx context.Context, targetIPs []string) {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 64)
+
+	for _, ip := range targetIPs {
+		select {
+		case <-ctx.Done():
+			return
+		case sem <- struct{}{}:
+		}
+
+		wg.Add(1)
+		go func(target string) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+
+			d := net.Dialer{Timeout: 30 * time.Millisecond}
+			conn, err := d.DialContext(ctx, "udp", net.JoinHostPort(target, "137"))
+			if err == nil {
+				_, _ = conn.Write([]byte{0x00})
+				_ = conn.Close()
+			}
+		}(ip)
+	}
+
+	wg.Wait()
+}
+
+// ProbeHost checks if a host is reachable using ARP, TCP probe, and fallback ICMP ping.
+// isLocalSubnet controls whether to skip external ICMP ping on ARP misses (since macOS ping
+// blocks 1.0s on ARP misses with 'sendto: No route to host').
+func ProbeHost(ctx context.Context, ip string, timeout time.Duration, arpCache *ARPCache, isLocalSubnet ...bool) ProbeResult {
 	if timeout <= 0 {
-		timeout = 350 * time.Millisecond
+		timeout = 250 * time.Millisecond
 	}
 
-	// 1. Rapid TCP probe on common ports first (Pure Go sockets, zero child process overhead)
-	tcpRes := probeTCP(ctx, ip, timeout)
-	if tcpRes.Alive {
-		return tcpRes
+	isLocal := false
+	if len(isLocalSubnet) > 0 {
+		isLocal = isLocalSubnet[0]
 	}
 
-	// 2. Check if ARP table has a confirmed valid MAC address for this IP
+	// 1. Check if ARP table already has a confirmed valid MAC address for this IP
 	if arpCache != nil {
-		if mac, ok := arpCache.Get(ip); ok && mac != "" && !strings.Contains(mac, "INCOMPLETE") {
+		if mac, ok := arpCache.Get(ip); ok && mac != "" && !strings.Contains(strings.ToUpper(mac), "INCOMPLETE") {
+			latency := 1.0
+			// Quick ICMP ping to measure exact latency for active host
+			if pingRes, err := pingICMP(ctx, ip, 150*time.Millisecond); err == nil && pingRes.Alive {
+				latency = pingRes.LatencyMs
+			}
 			return ProbeResult{
 				Alive:     true,
-				LatencyMs: 1.0,
+				LatencyMs: latency,
 				Method:    "arp",
 			}
 		}
 	}
 
-	// 3. Fallback to ICMP ping for hosts that have all TCP ports stealth/firewalled
+	// 2. Rapid TCP probe on common ports (Pure Go sockets, zero child process overhead)
+	tcpRes := probeTCP(ctx, ip, timeout)
+	if tcpRes.Alive {
+		return tcpRes
+	}
+
+	// 3. If on a local subnet and neither ARP nor TCP responded:
+	// Check ARP one more time in case the TCP probe attempt triggered an ARP resolution.
+	if isLocal {
+		if arpCache != nil {
+			if mac, ok := arpCache.Get(ip); ok && mac != "" && !strings.Contains(strings.ToUpper(mac), "INCOMPLETE") {
+				return ProbeResult{
+					Alive:     true,
+					LatencyMs: 1.0,
+					Method:    "arp",
+				}
+			}
+		}
+		// On a local subnet, an IP that doesn't answer ARP or TCP is dead.
+		// Avoid calling /sbin/ping because macOS ping will hang 1 second waiting for kernel ARP resolution.
+		return ProbeResult{Alive: false}
+	}
+
+	// 4. Fallback to ICMP ping for routed subnets or remote targets
 	icmpRes, err := pingICMP(ctx, ip, timeout)
 	if err == nil && icmpRes.Alive {
 		return icmpRes
@@ -73,8 +134,12 @@ func pingICMP(ctx context.Context, ip string, timeout time.Duration) (ProbeResul
 		timeoutMs = 100
 	}
 
-	// macOS ping: -c 1 (1 packet), -W <timeout in ms>
-	cmd := exec.CommandContext(ctx, "/sbin/ping", "-c", "1", "-W", strconv.Itoa(timeoutMs), ip)
+	// Hard context deadline to prevent child process from lingering
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout+200*time.Millisecond)
+	defer cancel()
+
+	// macOS ping: -c 1 (1 packet), -W <timeout in ms>, -n (numeric only, no DNS lookup)
+	cmd := exec.CommandContext(cmdCtx, "/sbin/ping", "-c", "1", "-W", strconv.Itoa(timeoutMs), "-n", ip)
 	start := time.Now()
 	out, err := cmd.Output()
 	elapsed := time.Since(start)
@@ -104,6 +169,9 @@ func pingICMP(ctx context.Context, ip string, timeout time.Duration) (ProbeResul
 
 // probeTCP tests a set of standard ports concurrently with very short deadline
 func probeTCP(ctx context.Context, ip string, timeout time.Duration) ProbeResult {
+	if timeout > 150*time.Millisecond {
+		timeout = 150 * time.Millisecond
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
