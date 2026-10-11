@@ -116,6 +116,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/action/ports", s.handlePortScan)
 	s.mux.HandleFunc("/api/export", s.handleExport)
 	s.mux.HandleFunc("/api/hosts/alias", s.handleAliases)
+	s.mux.HandleFunc("/api/system/info", s.handleSystemInfo)
 
 	// Static UI file server
 	if s.staticFS != nil {

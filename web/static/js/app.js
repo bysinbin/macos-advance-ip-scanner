@@ -125,11 +125,35 @@ const elements = {
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
+  fetchSystemInfo();
   fetchInterfaces();
   setupEventListeners();
   initEventSource();
   initTopology();
 });
+
+// Fetch System Info & Update OS Badge
+async function fetchSystemInfo() {
+  try {
+    const res = await fetch('/api/system/info');
+    if (!res.ok) return;
+    const info = await res.json();
+    const osBadge = document.getElementById('osBadge');
+    if (osBadge) {
+      if (info.os === 'windows') {
+        osBadge.textContent = 'Windows Edition';
+      } else if (info.os === 'darwin') {
+        osBadge.textContent = 'macOS Edition';
+      } else if (info.os === 'linux') {
+        osBadge.textContent = 'Linux Edition';
+      } else {
+        osBadge.textContent = `${info.os.toUpperCase()} Edition`;
+      }
+    }
+  } catch (e) {
+    // Ignore error
+  }
+}
 
 // Theme Management
 function initTheme() {

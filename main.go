@@ -26,7 +26,7 @@ const (
  | |\/| |/ _` + "`" + ` |/ __| | | \___ \   \___ \ / __/ _` + "`" + ` | '_ \| '_ \ / _ \ '__|
  | |  | | (_| | (__| |_| |___) |   ___) | (_| (_| | | | | | | |  __/ |   
  |_|  |_|\__,_|\___|\___/|____/   |____/ \___\__,_|_| |_|_| |_|\___|_|   
-                     Advanced IP Scanner for macOS v%s
+                     Advanced IP Scanner v%s (%s/%s)
 `
 )
 
@@ -47,7 +47,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("macOS Advanced IP Scanner v%s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("Advanced IP Scanner v%s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
 		return
 	}
 
@@ -62,7 +62,7 @@ func main() {
 }
 
 func runWebDashboard(port int, openBrowser bool) {
-	fmt.Printf(BannerArt, Version)
+	fmt.Printf(BannerArt, Version, runtime.GOOS, runtime.GOARCH)
 	url := fmt.Sprintf("http://localhost:%d", port)
 	fmt.Printf("🚀 Web Arayüzü başlatılıyor: %s\n", url)
 	fmt.Printf("   Durdurmak için Ctrl+C tuşlarına basın.\n\n")
@@ -98,7 +98,7 @@ func runWebDashboard(port int, openBrowser bool) {
 }
 
 func runCLIScan(targetRange string, scanPorts, deepScan bool, extraPortsStr string, timeoutMs, concurrency int, exportFormat string) {
-	fmt.Printf(BannerArt, Version)
+	fmt.Printf(BannerArt, Version, runtime.GOOS, runtime.GOARCH)
 
 	// If no range specified, auto-detect primary subnet
 	if targetRange == "" {
@@ -258,6 +258,9 @@ func openURL(url string) error {
 	case "linux":
 		return exec.Command("xdg-open", url).Start()
 	case "windows":
+		if err := exec.Command("cmd", "/c", "start", "", url).Start(); err == nil {
+			return nil
+		}
 		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	default:
 		return fmt.Errorf("unsupported platform")

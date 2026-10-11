@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"net"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -55,7 +57,7 @@ func DetectInterfaces() ([]NetworkInterfaceInfo, error) {
 
 			startIP, endIP := calculateSubnetRange(ipv4, mask)
 
-			isDefault := (iface.Name == defaultIface) || (strings.HasPrefix(iface.Name, "en") && defaultIface == "")
+			isDefault := (iface.Name == defaultIface) || (ipv4.String() == defaultIface) || (strings.HasPrefix(iface.Name, "en") && defaultIface == "")
 
 			gw := ""
 			if isDefault && defaultGateway != "" {
@@ -78,15 +80,89 @@ func DetectInterfaces() ([]NetworkInterfaceInfo, error) {
 		}
 	}
 
+	// Fallback: If no interface matched as default, mark the first active one
+	hasDefault := false
+	for _, r := range results {
+		if r.IsDefault {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault && len(results) > 0 {
+		results[0].IsDefault = true
+		if defaultGateway != "" {
+			results[0].GatewayIP = defaultGateway
+		}
+	}
+
 	return results, nil
 }
 
-// detectDefaultRoute runs netstat to identify default physical interface and gateway
+// detectDefaultRoute runs platform-specific commands to identify default interface and gateway
 func detectDefaultRoute() (string, string) {
-	cmd := exec.Command("netstat", "-rn", "-f", "inet")
+	if runtime.GOOS == "windows" {
+		return detectDefaultRouteWindows()
+	}
+	return detectDefaultRouteUnix()
+}
+
+func detectDefaultRouteWindows() (string, string) {
+	cmd := exec.Command("netstat", "-rn")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", ""
+	}
+
+	var bestIfaceIP, bestGw string
+	bestMetric := math.MaxInt32
+
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	inActiveRoutes := false
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.Contains(line, "Active Routes:") {
+			inActiveRoutes = true
+			continue
+		}
+		if inActiveRoutes && (strings.HasPrefix(line, "Persistent Routes:") || strings.Contains(line, "IPv6 Route Table")) {
+			break
+		}
+		if !inActiveRoutes {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) >= 5 && fields[0] == "0.0.0.0" && fields[1] == "0.0.0.0" {
+			gw := fields[2]
+			ifaceIP := fields[3]
+			metric, err := strconv.Atoi(fields[4])
+			if err != nil {
+				metric = 9999
+			}
+
+			if metric < bestMetric {
+				bestMetric = metric
+				bestIfaceIP = ifaceIP
+				bestGw = gw
+			}
+		}
+	}
+
+	return bestIfaceIP, bestGw
+}
+
+func detectDefaultRouteUnix() (string, string) {
+	// Try macOS netstat format first: netstat -rn -f inet
+	cmd := exec.Command("netstat", "-rn", "-f", "inet")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		// Fallback for Linux: netstat -rn
+		cmd = exec.Command("netstat", "-rn")
+		out, err = cmd.Output()
+		if err != nil {
+			return "", ""
+		}
 	}
 
 	var primaryIface, primaryGw string
@@ -94,7 +170,7 @@ func detectDefaultRoute() (string, string) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		fields := strings.Fields(line)
-		if len(fields) >= 4 && fields[0] == "default" {
+		if len(fields) >= 4 && (fields[0] == "default" || fields[0] == "0.0.0.0") {
 			gw := fields[1]
 			iface := fields[len(fields)-1]
 			// Prefer physical enX over utun VPN interfaces

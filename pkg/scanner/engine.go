@@ -321,6 +321,11 @@ func (e *Engine) scanSingleIP(ctx context.Context, ip string, opts ScanOptions, 
 	if mac, ok := e.arpCache.Get(ip); ok && mac != "" && !strings.Contains(strings.ToUpper(mac), "INCOMPLETE") {
 		host.MAC = mac
 		host.Vendor = LookupVendor(mac)
+	} else if e.isLocalSubnet(ip) {
+		if mac, ok := e.arpCache.QuerySingle(ip); ok && mac != "" {
+			host.MAC = mac
+			host.Vendor = LookupVendor(mac)
+		}
 	}
 
 	// If it's localhost and MAC not found in ARP, get it from local interface
@@ -382,6 +387,12 @@ func (e *Engine) enrichHostsWithARP() {
 				host.MAC = mac
 				host.Vendor = LookupVendor(mac)
 				updated = true
+			} else if e.isLocalSubnet(host.IP) {
+				if mac, ok := e.arpCache.QuerySingle(host.IP); ok && mac != "" {
+					host.MAC = mac
+					host.Vendor = LookupVendor(mac)
+					updated = true
+				}
 			}
 		}
 		if host.Model == "" {

@@ -1,6 +1,6 @@
-# macOS Advanced IP Scanner 🌐⚡
+# Advanced IP Scanner (Windows & macOS) 🌐⚡
 
-Windows'taki popüler **[Advanced IP Scanner](https://www.advanced-ip-scanner.com/tr/)** aracının macOS ekosistemi için **Go (Golang)** ile geliştirilmiş modern, hızlı ve bağımsız sürümü.
+Popüler **[Advanced IP Scanner](https://www.advanced-ip-scanner.com/tr/)** aracının **Go (Golang)** ile geliştirilmiş, hem **Windows** hem de **macOS** üzerinde tam uyumlu, ultra hızlı, bağımsız ve modern sürümü.
 
 Yerel ağınızdaki (LAN) tüm cihazları saniyeler içinde tespit eder; IP, MAC adresi, donanım üreticisi (OUI), NetBIOS/mDNS cihaz adları ve açık portları listeler.
 
@@ -8,10 +8,15 @@ Yerel ağınızdaki (LAN) tüm cihazları saniyeler içinde tespit eder; IP, MAC
 
 ## 🌟 Öne Çıkan Özellikler
 
-- 🚀 **Yüksek Hızlı Eşzamanlı Tarama:** Go goroutine havuzu (worker pool) ile tüm alt ağı (`/24` veya özel aralık) 2-3 saniyede tarar.
+- 🚀 **Yüksek Hızlı Eşzamanlı Tarama:** Go goroutine worker pool ile tüm alt ağı (`/24` veya özel aralık) 1-2 saniyede tarar.
+- 🪟 **Yerel Windows & Win32 Desteği:**
+  - **Win32 `SendARP` API Entegrasyonu:** `iphlpapi.dll` üzerinden yerel ağdaki cihazların MAC adreslerini anında (milisaniyeler içinde) çözer.
+  - **Windows Yönlendirme & Alt Ağ Tespiti:** Aktif ağ kartını (Wi-Fi, Ethernet vb.) ve ağ geçidini otomatik bulur.
+  - **Windows ICMP Ping Entegrasyonu:** Windows `ping.exe` parametre ve çıktıları ile tam uyumlu gecikme ölçümü.
+- 🍏 **Tam macOS & Linux Uyumluluğu:** macOS ARP ve ping mekanizmaları korunmuş olup, tek kod tabanıyla cross-platform çalışır.
 - 📡 **Gelişmiş Cihaz Tespiti:**
   - **Ping & TCP Probing:** ICMP ping engelli olsa bile (Windows Firewall vs.) TCP RST/SYN ve ARP yanıtlarıyla cihazı anında yakalar.
-  - **MAC Adresi & OUI Üretici Tespiti:** macOS ARP tablosu entegrasyonu ve binlerce üreticiyi (Apple, Samsung, Intel, TP-Link, Xiaomi, Espressif, Cisco, Ubiquiti, HP, Canon vb.) tanıyan gömülü donanım veritabanı.
+  - **MAC Adresi & OUI Üretici Tespiti:** Windows & macOS ARP tablosu entegrasyonu ve binlerce üreticiyi (Apple, Samsung, Intel, TP-Link, Xiaomi, Espressif, Cisco, Ubiquiti, HP, Canon vb.) tanıyan gömülü donanım veritabanı.
   - **Çoklu İsim Çözümleme:** mDNS / Bonjour (`.local`), NetBIOS (UDP 137 sorgusu ile Windows/Samba bilgisayar adları) ve Ters DNS (rDNS).
 - 🔌 **Popüler & Derin Port Taraması:**
   - Hızlı tarama: HTTP (80/443), SSH (22), SMB (445), RDP (3389), RTSP Kamera (554), VNC (5900), Yazıcı JetDirect (9100) vb.
@@ -24,15 +29,9 @@ Yerel ağınızdaki (LAN) tüm cihazları saniyeler içinde tespit eder; IP, MAC
   - **Wake-on-LAN (WOL):** Uyuyan cihazları uzaktan uyandırmak için Magic Packet gönderme.
   - **Dışa Aktarma (Export):** Sonuçları tek tıkla **CSV**, **JSON** veya **TXT** olarak kaydetme.
 - 🎨 **3 Farklı Erişim Modu:**
-  1. **Modern Web Dashboard:** macOS Sonoma/Sequoia ilhamlı glassmorphism, karanlık/aydınlık tema, anlık arama ve canlı radar animasyonu.
+  1. **Modern Web Dashboard:** Glassmorphism, karanlık/aydınlık tema, anlık arama ve canlı radar animasyonu.
   2. **Terminal CLI Modu:** Renkli ANSI tablo ve ilerleme çubuğu ile konsoldan tarama.
-  3. **macOS .app Paketi:** Çift tıklamayla doğrudan açılan bağımsız masaüstü paketi.
-
----
-
-## 📸 Ekran Görüntüleri & Görünüm
-
-Modern koyu tema, cam efekti (glassmorphism), canlı durum göstergeleri ve macOS pencere kontrolleri ile donatılmıştır.
+  3. **Bağımsız Masaüstü Çalıştırma:** Windows için `.bat` kısayolları ve macOS `.app` paketi.
 
 ---
 
@@ -40,15 +39,28 @@ Modern koyu tema, cam efekti (glassmorphism), canlı durum göstergeleri ve macO
 
 Sisteminizde **Go 1.20+** yüklü olması yeterlidir. Harici hiçbir kütüphane bağımlılığı yoktur (Zero Dependency).
 
-```bash
-# Depoyu klonlayın
-git clone https://github.com/feritetem/macos-advance-ip-scanner.git
-cd macos-advance-ip-scanner
+### Windows'ta:
+```bat
+# Derlemek için:
+build.bat
+# veya elle:
+go build -ldflags="-s -w" -o ip-scanner.exe main.go
 
+# Çalıştırmak için:
+run.bat
+# veya:
+.\ip-scanner.exe
+```
+
+### macOS / Linux'ta:
+```bash
 # Derleyin
-go build -o macos-advance-ip-scanner main.go
+go build -o ip-scanner main.go
 # veya
 make build
+
+# Çalıştırın
+./ip-scanner
 ```
 
 ---
@@ -58,7 +70,11 @@ make build
 ### 1. Web Arayüzü ile Başlatma (Varsayılan)
 
 ```bash
-./macos-advance-ip-scanner
+# Windows
+.\ip-scanner.exe
+
+# macOS / Linux
+./ip-scanner
 ```
 
 Komutu çalıştırdığınızda yerel web sunucusu başlar ve varsayılan tarayıcınızda otomatik olarak açılır:
